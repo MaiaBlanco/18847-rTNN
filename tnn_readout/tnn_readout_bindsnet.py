@@ -124,6 +124,7 @@ dataloader = torch.utils.data.DataLoader(
 # Run training data on reservoir computer and store (spikes per neuron, label) per example.
 n_iters = examples
 training_pairs = []
+
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
     if i > n_iters:
