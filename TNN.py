@@ -11,7 +11,13 @@ from time import time as t
 
 # Get base class to implement our own neuron type
 from bindsnet.network.nodes import Nodes
+from bindsnet.network.topology import AbstractConnection, Connection
 from bindsnet.learning import LearningRule
+
+from abc import ABC, abstractmethod
+from functools import reduce
+from operator import mul
+from typing import Iterable, Optional, Union, Sequence
 
 class TemporalNeurons(Nodes):
 	"""
@@ -35,7 +41,7 @@ class TemporalNeurons(Nodes):
 		self, 
 		n: Optional[int] = None,
 		shape: Optional[Iterable[int]] = None,
-		timesteps: int,
+		timesteps: int = 10,
 		threshold: Optional[int] = None,
 		num_winners: Optional[int] = None,
 		# Boilerplate inputs that I don't care about:
@@ -66,7 +72,7 @@ class TemporalNeurons(Nodes):
 			self.threshold = timesteps
 		else:
 			self.threshold = threshold
-		self.register_buffer("thresh", torch.tensor(self.threshold), dtype=torch.int)
+		self.register_buffer("thresh", torch.tensor(self.threshold, dtype=torch.int))
 		# For storing summed inputs along time per neuron:
 		self.register_buffer("cumulative_inputs", torch.IntTensor())
 	
@@ -87,19 +93,19 @@ class TemporalNeurons(Nodes):
 	# input -> neuron connection, and then reduced into a vector.
 	# Since this class handles multiple neurons, the input tensor
 	# has dimensionality num_neurons x time.
-	def forward(self, x_temporal) -> None:
+	def forward(self, x) -> None:
 		# self.v - voltages
 		# self.thresh - firing threshold
 		# self.s - self output (temporal coded)
 		# Where are the weights? These are presynaptic. The x_temporal we 
 		# receive here is post synaptic, and already scaled by synaptic weight.
 		# Therefore each neuron just needs to integrate over time and threshold.
-		last_dim = x_temporal.dim()-1
-		self.cumulative_inputs = torch.cumsum(x_temporal, last_dim)
+		last_dim = x.dim()-1
+		self.cumulative_inputs = torch.cumsum(x, last_dim)
 		self.s[self.cumulative_inputs >= self.threshold] = 1			
 		self.pointwise_inhibition() # Apply inhibition to self.s
 		# ...
-		super().forward(x_temporal)
+		super().forward(x)
 
 	def reset_state_variables(self) -> None:
 		self.cumulative_inputs.zero()
@@ -144,8 +150,7 @@ class TNN_STDP(LearningRule):
         usearch: float,
         ubackoff: float,
         umin: float,
-        umax: float,
-       	maxweight,: float 
+       	maxweight: float, 
         nu: Optional[Union[float, Sequence[float]]] = None,
         reduction: Optional[callable] = None,
         weight_decay: float = 0.0,
@@ -176,7 +181,7 @@ class TNN_STDP(LearningRule):
         self.ubackoff = ubackoff
         self.umin = umin
         self.maxweight = maxweight
-        trand.manual_seed(0)        # set seed for determinism
+        #trand.manual_seed(0)        # set seed for determinism
 
 
 
@@ -187,16 +192,16 @@ class TNN_STDP(LearningRule):
         """
         input_spikes = self.connection.source.s
         output_spikes = self.connection.target.s
-        weights = self.connection.w.view()
+        weights = self.connection.w.view( (self.connection.source.n, self.connection.target.n) )
 
         # Copied from lab 1 in spyketorch:
         # Find when input spike occurred (if at all) for each input channel 
         # and receptive field row and column:
-        x_times = int(self.maxweight) - torch.sum(input_spikes.int(), input_spikes.dim()-1)
+        x_times = torch.flatten(int(self.maxweight) - torch.sum(input_spikes.int(), input_spikes.dim()-1))
         # ^ should have shape connection.source.shape
 
         # Do the same for outputs (max weight = number of time steps):
-        y_times = int(self.maxweight) - torch.sum(output_spikes.int(), output_spikes.dim()-1)
+        y_times = torch.flatten(int(self.maxweight) - torch.sum(output_spikes.int(), output_spikes.dim()-1))
         # ^ should have shape connection.target.shape
 
         # Get tensor for umin
@@ -209,13 +214,17 @@ class TNN_STDP(LearningRule):
         # Each weight maps one temporal pixel in the receptive field (connection.source) to a neuron
         # in connection.target
         # So, we need to broadcast each input spike time in the receptive field to each 
-        # neuron and vice-versa.
-        desired_size = (y_times.size()[0], *x_times.size())
+        # neuron and vice-versa. This is sort of an outer product?
+        desired_size = (weights.size())
         bcast_y = torch.zeros(desired_size)
-        bcast_x = torch.zeros(desired_size) 
-        for i in range(self.layer.out_channels):
-        	bcast_y[i,:,:,:] = y_slice[i]
-        	bcast_x[i,:,:,:] = x_slice
+        bcast_x = torch.zeros(desired_size)
+        # For each elem in y, x needs to be copied across the 2nd dimension of bcast_x 
+        for i in range( y_slice.numel() ):
+        	bcast_x[:,i] = x_slice
+
+        # and for each elem in x, y must be copied across the 1st dimension of bcast_y
+        for i in range(x_slice.numel()):
+        	bcast_y[i,:] = y_slice
 
         # Conditions for weight updates:
         A = bcast_x == self.maxweight
@@ -230,7 +239,7 @@ class TNN_STDP(LearningRule):
         # 5. A ^ B              No change
 
         # Get weights patch:
-        weights_patch = torch.clone(self.layer.weight[neural_row,neural_col,:,:,:,:]).float()
+        weights_patch = torch.clone(weights).float()
         
         # Need 2 sets of probabilities for increment and decrement:
         probs_plus = torch.zeros_like(weights_patch).float()
@@ -268,6 +277,6 @@ class TNN_STDP(LearningRule):
         torch.clamp_(weights_patch, 0, self.maxweight)
 
         # Assign updated weights back to layer
-        self.layer.weight[neural_row,neural_col,:,:,:,:] = weights_patch.int()
+        self.connection.w = weights_patch.int()
 
         super().update()
