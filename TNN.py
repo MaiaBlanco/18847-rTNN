@@ -113,13 +113,7 @@ class TemporalNeurons(Nodes):
             print(self.s)
         super().forward(x)
 
-
-
-
     def reset_state_variables(self) -> None:
-        print("CALLING TNN NODE RESET")
-        print("CALLING TNN NODE RESET")
-        print("CALLING TNN NODE RESET")
         self.cumulative_inputs.zero_()
         self.output_history.zero_()
         self.output_sums.zero_()
@@ -205,6 +199,8 @@ class TNN_STDP(LearningRule):
         self.counter = 0
         self.timesteps = timesteps
         #trand.manual_seed(0)        # set seed for determinism
+        self.input_spikes = torch.IntTensor((timesteps, *self.connection.source.shape))
+        self.output_spikes = torch.IntTensor((timesteps, *self.connection.target.shape))
 
 
 
@@ -214,21 +210,21 @@ class TNN_STDP(LearningRule):
         Abstract method for a learning rule update.
         """
         print("COUNTER IN UPDATE: ", self.counter)
+        self.input_spikes[self.counter, :] = self.connection.source.s
+        self.output_spikes[self.counter, :] = self.connection.target.s
         self.counter += 1
         if (self.counter == self.timesteps):
             self.counter = 0
-            input_spikes = self.connection.source.s
-            output_spikes = self.connection.target.s
             weights = self.connection.w.view( (self.connection.source.n, self.connection.target.n) )
 
             # Copied from lab 1 in spyketorch:
             # Find when input spike occurred (if at all) for each input channel 
             # and receptive field row and column:
-            x_times = torch.flatten(int(self.maxweight) - torch.sum(input_spikes.int(), input_spikes.dim()-1))
+            x_times = torch.flatten(int(self.maxweight) - torch.sum(input_spikes.int(), 0))
             # ^ should have shape connection.source.shape
 
             # Do the same for outputs (max weight = number of time steps):
-            y_times = torch.flatten(int(self.maxweight) - torch.sum(output_spikes.int(), output_spikes.dim()-1))
+            y_times = torch.flatten(int(self.maxweight) - torch.sum(output_spikes.int(), 0))
             # ^ should have shape connection.target.shape
 
             # Get tensor for umin
