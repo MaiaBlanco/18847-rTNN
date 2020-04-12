@@ -83,7 +83,7 @@ else:
     torch.manual_seed(seed)
 
 # build network:
-network = Network(dt=num_timesteps)
+network = Network(dt=1)
 input_layer = Input(n=input_size)
 
 tnn_layer_1 = TemporalNeurons( \
@@ -104,6 +104,7 @@ C1 = Connection(
 	usearch = 	1/128,
 	ubackoff = 	96/128,
 	umin = 		4/128,
+	timesteps = num_timesteps,
 	maxweight = num_timesteps
 	)
 

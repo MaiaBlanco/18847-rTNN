@@ -1,3 +1,4 @@
+import pdb
 import os
 import torch
 import argparse
@@ -85,6 +86,7 @@ class TemporalNeurons(Nodes):
         # There already is a bytetensor in the base class called s for spikes
         # but having a buffer for output sums is still helpful if applying inhibition:
         self.register_buffer("output_sums", torch.zeros(self.shape, dtype=torch.int8))
+        self.register_buffer("output_history", torch.zeros((self.timesteps, *self.shape), dtype=torch.int8))
         self.counter = 0 # To keep track of time
 
     # Forward function needs to sum across the time domain:
@@ -95,7 +97,7 @@ class TemporalNeurons(Nodes):
     # Since this class handles multiple neurons, the input tensor
     # has dimensionality num_neurons x time.
     def forward(self, x) -> None:
-        self.counter += 1
+        print("COUNTER IN TNN LAYER: ", self.counter)
         # self.v - voltages
         # self.thresh - firing threshold
         # self.s - self output (temporal coded)
@@ -103,38 +105,48 @@ class TemporalNeurons(Nodes):
         # receive here is post synaptic, and already scaled by synaptic weight.
         # Therefore each neuron just needs to integrate over time and threshold.
         self.cumulative_inputs += torch.squeeze(x)
-        new_spikes = (self.cumulative_inputs >= self.threshold) and not self.new_mask
+        self.output_history[self.counter,:] = (self.cumulative_inputs >= self.threshold)
+        self.counter += 1
         if (self.counter == self.timesteps):
-            self.new_mask = self.pointwise_inhibition() # Apply inhibition to self.s
+            self.s = self.pointwise_inhibition() # Apply inhibition to self.s 
+            print(x)
+            print(self.s)
         super().forward(x)
 
 
-        self.s
 
 
     def reset_state_variables(self) -> None:
-        self.cumulative_inputs.zero()
-        self.s.zero()
-        super.reset_state_variables()
+        print("CALLING TNN NODE RESET")
+        print("CALLING TNN NODE RESET")
+        print("CALLING TNN NODE RESET")
+        self.cumulative_inputs.zero_()
+        self.output_history.zero_()
+        self.output_sums.zero_()
+        self.counter = 0
+        super().reset_state_variables()
 
     # Apply pointwise inhibition to computed spike outputs
     def pointwise_inhibition(self) -> None:
+        self.output_sums = torch.squeeze(torch.sum(self.output_history, 0))
         if not self.inhibition or self.num_winners >= self.n:
+            return self.output_sums >= 1
+            print("STUCK HERE")
             return
-        
 
-        '''
-        self.output_sums = torch.reshape(torch.sum(self.s, self.s.dim()-1), \
-            (self.n))
-        flattened_spikes = torch.reshape(torch.s, (self.n, self.timesteps))
+        # Take output history and sum over time (1st dimension)
+        print("SHAPE")
+        print(output_sums.shape)
+        print("SHAPE")
+        # flatten remaining dimensions in output_sums so it's a vector
+        flattened_spikes = torch.flatten(self.output_sums)
         # First to fire will have higher output sum:
-        indices = torch.argsort(self.output_sums, descending=True)
+        indices = torch.argsort(flattened_spikes, descending=True)
         # Use indices to clear neuron outputs from 
         # num_winners to n:
         losing_indices = indices[self.num_winners:]
-        flattened_spikes[losing_indices,:] = 0
-        self.s = torch.reshape(flattened_spikes, (*self.shape, self.timesteps)) 
-        '''
+        flattened_spikes[losing_indices:] = 0
+        return torch.reshape(flattened_spikes >= 1, self.shape) 
 
         
 class TNN_STDP(LearningRule):
@@ -159,6 +171,7 @@ class TNN_STDP(LearningRule):
         ubackoff: float,
         umin: float,
         maxweight: float, 
+        timesteps: int = None,
         nu: Optional[Union[float, Sequence[float]]] = None,
         reduction: Optional[callable] = None,
         weight_decay: float = 0.0,
@@ -189,6 +202,8 @@ class TNN_STDP(LearningRule):
         self.ubackoff = ubackoff
         self.umin = umin
         self.maxweight = maxweight
+        self.counter = 0
+        self.timesteps = timesteps
         #trand.manual_seed(0)        # set seed for determinism
 
 
@@ -198,93 +213,97 @@ class TNN_STDP(LearningRule):
         """
         Abstract method for a learning rule update.
         """
-        input_spikes = self.connection.source.s
-        output_spikes = self.connection.target.s
-        weights = self.connection.w.view( (self.connection.source.n, self.connection.target.n) )
+        print("COUNTER IN UPDATE: ", self.counter)
+        self.counter += 1
+        if (self.counter == self.timesteps):
+            self.counter = 0
+            input_spikes = self.connection.source.s
+            output_spikes = self.connection.target.s
+            weights = self.connection.w.view( (self.connection.source.n, self.connection.target.n) )
 
-        # Copied from lab 1 in spyketorch:
-        # Find when input spike occurred (if at all) for each input channel 
-        # and receptive field row and column:
-        x_times = torch.flatten(int(self.maxweight) - torch.sum(input_spikes.int(), input_spikes.dim()-1))
-        # ^ should have shape connection.source.shape
+            # Copied from lab 1 in spyketorch:
+            # Find when input spike occurred (if at all) for each input channel 
+            # and receptive field row and column:
+            x_times = torch.flatten(int(self.maxweight) - torch.sum(input_spikes.int(), input_spikes.dim()-1))
+            # ^ should have shape connection.source.shape
 
-        # Do the same for outputs (max weight = number of time steps):
-        y_times = torch.flatten(int(self.maxweight) - torch.sum(output_spikes.int(), output_spikes.dim()-1))
-        # ^ should have shape connection.target.shape
+            # Do the same for outputs (max weight = number of time steps):
+            y_times = torch.flatten(int(self.maxweight) - torch.sum(output_spikes.int(), output_spikes.dim()-1))
+            # ^ should have shape connection.target.shape
 
-        # Get tensor for umin
-        umin_tensor = torch.full(weights.size(), self.umin, dtype=torch.float)
-        
-        # Get the input receptive field (here it's the whole thing. No slicing.)
-        x_slice = x_times
-        y_slice = y_times
-        # Each output corresponds to one of connection.target.n neurons in the receptive field.
-        # Each weight maps one temporal pixel in the receptive field (connection.source) to a neuron
-        # in connection.target
-        # So, we need to broadcast each input spike time in the receptive field to each 
-        # neuron and vice-versa. This is sort of an outer product?
-        desired_size = (weights.size())
-        bcast_y = torch.zeros(desired_size)
-        bcast_x = torch.zeros(desired_size)
-        # For each elem in y, x needs to be copied across the 2nd dimension of bcast_x 
-        for i in range( y_slice.numel() ):
-            bcast_x[:,i] = x_slice
+            # Get tensor for umin
+            umin_tensor = torch.full(weights.size(), self.umin, dtype=torch.float)
+            
+            # Get the input receptive field (here it's the whole thing. No slicing.)
+            x_slice = x_times
+            y_slice = y_times
+            # Each output corresponds to one of connection.target.n neurons in the receptive field.
+            # Each weight maps one temporal pixel in the receptive field (connection.source) to a neuron
+            # in connection.target
+            # So, we need to broadcast each input spike time in the receptive field to each 
+            # neuron and vice-versa. This is sort of an outer product?
+            desired_size = (weights.size())
+            bcast_y = torch.zeros(desired_size)
+            bcast_x = torch.zeros(desired_size)
+            # For each elem in y, x needs to be copied across the 2nd dimension of bcast_x 
+            for i in range( y_slice.numel() ):
+                bcast_x[:,i] = x_slice
 
-        # and for each elem in x, y must be copied across the 1st dimension of bcast_y
-        for i in range(x_slice.numel()):
-            bcast_y[i,:] = y_slice
+            # and for each elem in x, y must be copied across the 1st dimension of bcast_y
+            for i in range(x_slice.numel()):
+                bcast_y[i,:] = y_slice
 
-        # Conditions for weight updates:
-        A = bcast_x == self.maxweight
-        B = bcast_y == self.maxweight
-        C = bcast_x > bcast_y
+            # Conditions for weight updates:
+            A = bcast_x == self.maxweight
+            B = bcast_y == self.maxweight
+            C = bcast_x > bcast_y
 
-        # The 5 cases:
-        # 1. !A ^ !B ^ !C       increase with P=capture
-        # 2. !A ^ !B ^ C        decrease with P=minus
-        # 3. !A ^ B             increase with P=search
-        # 4. A ^ !B             decrease weight with P=backoff
-        # 5. A ^ B              No change
+            # The 5 cases:
+            # 1. !A ^ !B ^ !C       increase with P=capture
+            # 2. !A ^ !B ^ C        decrease with P=minus
+            # 3. !A ^ B             increase with P=search
+            # 4. A ^ !B             decrease weight with P=backoff
+            # 5. A ^ B              No change
 
-        # Get weights patch:
-        weights_patch = torch.clone(weights).float()
-        
-        # Need 2 sets of probabilities for increment and decrement:
-        probs_plus = torch.zeros_like(weights_patch).float()
-        probs_minus = torch.zeros_like(weights_patch).float()
-        probs_plus[~A & ~B & ~C] = self.ucapture
-        probs_minus[~A & ~B & C] = self.uminus
-        probs_plus[~A & B] = self.usearch
-        probs_minus[A & ~B] = self.ubackoff
-        # Implicitly all other entries are zero, which means no update will be applied.
+            # Get weights patch:
+            weights_patch = torch.clone(weights).float()
+            
+            # Need 2 sets of probabilities for increment and decrement:
+            probs_plus = torch.zeros_like(weights_patch).float()
+            probs_minus = torch.zeros_like(weights_patch).float()
+            probs_plus[~A & ~B & ~C] = self.ucapture
+            probs_minus[~A & ~B & C] = self.uminus
+            probs_plus[~A & B] = self.usearch
+            probs_minus[A & ~B] = self.ubackoff
+            # Implicitly all other entries are zero, which means no update will be applied.
 
-        # Generate probabilities that weight updates occur:
-        bernoulli_frame_plus  = torch.bernoulli(probs_plus)
-        bernoulli_frame_minus = torch.bernoulli(probs_minus)
+            # Generate probabilities that weight updates occur:
+            bernoulli_frame_plus  = torch.bernoulli(probs_plus)
+            bernoulli_frame_minus = torch.bernoulli(probs_minus)
 
-        # Division costs a lot more than multiply, so compute the inverse once:
-        inv_max_weight = 1/self.maxweight
-        F_probs_ratio = torch.mul(weights_patch, inv_max_weight)
+            # Division costs a lot more than multiply, so compute the inverse once:
+            inv_max_weight = 1/self.maxweight
+            F_probs_ratio = torch.mul(weights_patch, inv_max_weight)
 
-        # Compute F +/- probabilities 
-        F_minus_probs = (1-F_probs_ratio) * (1+F_probs_ratio)
-        F_minus = torch.bernoulli(F_minus_probs)
-        F_plus_probs = F_probs_ratio * (2 - F_probs_ratio)
-        F_plus = torch.bernoulli(F_plus_probs)
+            # Compute F +/- probabilities 
+            F_minus_probs = (1-F_probs_ratio) * (1+F_probs_ratio)
+            F_minus = torch.bernoulli(F_minus_probs)
+            F_plus_probs = F_probs_ratio * (2 - F_probs_ratio)
+            F_plus = torch.bernoulli(F_plus_probs)
 
-        # add umin probability to F+/- probability:
-        umin_bernoulli = torch.bernoulli(umin_tensor)
-        F_plus = torch.max(F_plus, umin_bernoulli)
-        F_minus = torch.max(F_minus, umin_bernoulli)
+            # add umin probability to F+/- probability:
+            umin_bernoulli = torch.bernoulli(umin_tensor)
+            F_plus = torch.max(F_plus, umin_bernoulli)
+            F_minus = torch.max(F_minus, umin_bernoulli)
 
-        # Apply updates to weights patch (ewise add)
-        weights_patch = torch.add(weights_patch, bernoulli_frame_plus * F_plus)
-        weights_patch = torch.add(weights_patch, -1 * bernoulli_frame_minus * F_minus)
+            # Apply updates to weights patch (ewise add)
+            weights_patch = torch.add(weights_patch, bernoulli_frame_plus * F_plus)
+            weights_patch = torch.add(weights_patch, -1 * bernoulli_frame_minus * F_minus)
 
-        # Clamp outputs to range
-        torch.clamp_(weights_patch, 0, self.maxweight)
+            # Clamp outputs to range
+            torch.clamp_(weights_patch, 0, self.maxweight)
 
-        # Assign updated weights back to layer
-        self.connection.w = weights_patch.int()
+            # Assign updated weights back to layer
+            self.connection.w = weights_patch.int()
 
         super().update()
