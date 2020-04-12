@@ -16,9 +16,12 @@ from bindsnet.network import Network
 from bindsnet.network.monitors import Monitor
 from bindsnet.network.nodes import Input
 from bindsnet.network.topology import Conv2dConnection, Connection
+from bindsnet.utils import get_square_weights
 from bindsnet.analysis.plotting import (
 	plot_input,
 	plot_spikes,
+    plot_voltages,
+    plot_weights,
 	plot_conv2d_weights,
 	plot_voltages,
 )
@@ -32,6 +35,7 @@ parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--n_epochs", type=int, default=1)
 parser.add_argument("--n_test", type=int, default=10000)
 parser.add_argument("--kernel_size", type=int, default=16)
+parser.add_argument("--examples", type=int, default=500)
 parser.add_argument("--stride", type=int, default=4)
 parser.add_argument("--n_filters", type=int, default=25)
 parser.add_argument("--padding", type=int, default=0)
@@ -56,6 +60,7 @@ n_test = args.n_test
 kernel_size = args.kernel_size
 stride = args.stride
 n_filters = args.n_filters
+examples = args.examples
 padding = args.padding
 time = args.time
 dt = args.dt
@@ -70,7 +75,7 @@ device_id =  0#args.device_id
 input_size = 28*28
 tnn_layer_sz = 5
 num_timesteps = 8
-tnn_thresh = 16
+tnn_thresh = 32
 
 time = num_timesteps
 dt = num_timesteps
@@ -132,7 +137,18 @@ dataloader = torch.utils.data.DataLoader(
 	dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=gpu
 )
 
-n_iters = 100 #examples
+
+inpt_axes = None
+inpt_ims = None
+spike_axes = None
+spike_ims = None
+weights_im = None
+weights_im2 = None
+voltage_ims = None
+voltage_axes = None
+
+
+n_iters = examples
 training_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
@@ -156,11 +172,11 @@ for (i, dataPoint) in pbar:
 			axes=inpt_axes,
 			ims=inpt_ims,
 		)
-		spike_ims, spike_axes = plot_spikes(
-			{layer: spikes[layer].get("s").view(-1, time) for layer in spikes},
-			axes=spike_axes,
-			ims=spike_ims,
-		)
+		#spike_ims, spike_axes = plot_spikes(
+		#	{layer: spikes[layer].get("s").view(-1, time) for layer in spikes},
+		#	axes=spike_axes,
+		#	ims=spike_ims,
+		#)
 		weights_im = plot_weights(
 			get_square_weights(C1.w, 23, 28), im=weights_im, wmin=-2, wmax=2
 		)
