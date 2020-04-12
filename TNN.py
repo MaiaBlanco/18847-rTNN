@@ -20,115 +20,123 @@ from operator import mul
 from typing import Iterable, Optional, Union, Sequence
 
 class TemporalNeurons(Nodes):
-	"""
-	Neuron sub-class based on Nodes base class in bindsNet
+    """
+    Neuron sub-class based on Nodes base class in bindsNet
 
-	This neuron implements the same functionality as we had in lab 1:
-	temporal neurons that have a time resolution (number of steps),
-	firing threshold (integer value), current value (integer),
+    This neuron implements the same functionality as we had in lab 1:
+    temporal neurons that have a time resolution (number of steps),
+    firing threshold (integer value), current value (integer),
 
-	Methods are:
-	* initialization to set the neuron parameters
-	* forward method to take TEMPORAL inputs in the input receptive field and
-	output a temporally-encoded response.
-	* reset method to set the neuron back to normal operation after being inhibited
-	or at the end of computation wave (gamma oscillation)
-	* training function to update the weights (via STDP)
-	* required _compute_decays() method, which won't do anything here.
-	"""
+    Methods are:
+    * initialization to set the neuron parameters
+    * forward method to take TEMPORAL inputs in the input receptive field and
+    output a temporally-encoded response.
+    * reset method to set the neuron back to normal operation after being inhibited
+    or at the end of computation wave (gamma oscillation)
+    * training function to update the weights (via STDP)
+    * required _compute_decays() method, which won't do anything here.
+    """
 
-	def __init__(
-		self, 
-		n: Optional[int] = None,
-		shape: Optional[Iterable[int]] = None,
-		timesteps: int = 10,
-		threshold: Optional[int] = None,
-		num_winners: Optional[int] = None,
-		# Boilerplate inputs that I don't care about:
-		traces: bool = False,
-		traces_additive: bool = False,
-		tc_trace: Union[float, torch.Tensor] = 20.0,
-		trace_scale: Union[float, torch.Tensor] = 10.0,
-		sum_input: bool = False, 
-		thresh: Union[int, torch.Tensor] = 8,
-		**kwargs,
-		) -> None:
+    def __init__(
+        self, 
+        n: Optional[int] = None,
+        shape: Optional[Iterable[int]] = None,
+        timesteps: int = 10,
+        threshold: Optional[int] = None,
+        num_winners: Optional[int] = None,
+        # Boilerplate inputs that I don't care about:
+        traces: bool = False,
+        traces_additive: bool = False,
+        tc_trace: Union[float, torch.Tensor] = 20.0,
+        trace_scale: Union[float, torch.Tensor] = 10.0,
+        sum_input: bool = False, 
+        thresh: Union[int, torch.Tensor] = 8,
+        **kwargs,
+        ) -> None:
 
-		super().__init__(
-			n=n,
-			shape=shape,
+        super().__init__(
+            n=n,
+            shape=shape,
             traces=False, 
             traces_additive=False,
             tc_trace=tc_trace,
             trace_scale=trace_scale,
-            sum_input=False,	
-		)
+            sum_input=False,    
+        )
 
-		# NOTE: neuron weights are initialized in the Connection class, 
-		# which then handles pre- to post-synaptic scaling of inputs.
-		# Set number of timesteps (this is also the threshold if otherwise not set)
-		self.timesteps = timesteps
-		if threshold is None:
-			self.threshold = timesteps
-		else:
-			self.threshold = threshold
-		self.register_buffer("thresh", torch.tensor(self.threshold, dtype=torch.int))
-		# For storing summed inputs along time per neuron:
-		self.register_buffer("cumulative_inputs", torch.IntTensor())
-	
-		if num_winners is None:
-			self.inhibition = False
-			self.num_winners = self.n
-		else:
-			self.inhibition = True
-			self.num_winners = num_winners	
-		# There already is a bytetensor in the base class called s for spikes
-		# but having a buffer for output sums is still helpful if applying inhibition:
-		self.register_buffer("output_sums", torch.ByteTensor())
+        # NOTE: neuron weights are initialized in the Connection class, 
+        # which then handles pre- to post-synaptic scaling of inputs.
+        # Set number of timesteps (this is also the threshold if otherwise not set)
+        self.timesteps = timesteps
+        if threshold is None:
+            self.threshold = timesteps
+        else:
+            self.threshold = threshold
+        self.register_buffer("thresh", torch.tensor(self.threshold, dtype=torch.int))
+        # For storing summed inputs along time per neuron:
+        self.register_buffer("cumulative_inputs", torch.zeros(self.shape, dtype=torch.float))
+    
+        if num_winners is None:
+            self.inhibition = False
+            self.num_winners = self.n
+        else:
+            self.inhibition = True
+            self.num_winners = num_winners  
+        # There already is a bytetensor in the base class called s for spikes
+        # but having a buffer for output sums is still helpful if applying inhibition:
+        self.register_buffer("output_sums", torch.zeros(self.shape, dtype=torch.int8))
+        self.counter = 0 # To keep track of time
 
-	# Forward function needs to sum across the time domain:
-	# x_temporal is a tensor of post-synaptic activations.
-	# This means that each single spike (if present) along the time 
-	# dimension has already been scaled by the weight for that 
-	# input -> neuron connection, and then reduced into a vector.
-	# Since this class handles multiple neurons, the input tensor
-	# has dimensionality num_neurons x time.
-	def forward(self, x) -> None:
-		# self.v - voltages
-		# self.thresh - firing threshold
-		# self.s - self output (temporal coded)
-		# Where are the weights? These are presynaptic. The x_temporal we 
-		# receive here is post synaptic, and already scaled by synaptic weight.
-		# Therefore each neuron just needs to integrate over time and threshold.
-		last_dim = x.dim()-1
-		self.cumulative_inputs = torch.cumsum(x, last_dim)
-		self.s[self.cumulative_inputs >= self.threshold] = 1			
-		self.pointwise_inhibition() # Apply inhibition to self.s
-		# ...
-		super().forward(x)
-
-	def reset_state_variables(self) -> None:
-		self.cumulative_inputs.zero()
-		self.s.zero()
-		super.reset_state_variables()
-
-	# Apply pointwise inhibition to computed spike outputs
-	def pointwise_inhibition(self) -> None:
-		if not self.inhibition or self.num_winners >= self.n:
-			return
-		self.output_sums = torch.reshape(torch.sum(self.s, self.s.dim()-1), \
-			(self.n))
-		flattened_spikes = torch.reshape(torch.s, (self.n, self.timesteps))
-		# First to fire will have higher output sum:
-		indices = torch.argsort(self.output_sums, descending=True)
-		# Use indices to clear neuron outputs from 
-		# num_winners to n:
-		losing_indices = indices[self.num_winners:]
-		flattened_spikes[losing_indices,:] = 0
-		self.s = torch.reshape(flattened_spikes, (*self.shape, self.timesteps)) 
+    # Forward function needs to sum across the time domain:
+    # x_temporal is a tensor of post-synaptic activations.
+    # This means that each single spike (if present) along the time 
+    # dimension has already been scaled by the weight for that 
+    # input -> neuron connection, and then reduced into a vector.
+    # Since this class handles multiple neurons, the input tensor
+    # has dimensionality num_neurons x time.
+    def forward(self, x) -> None:
+        self.counter += 1
+        # self.v - voltages
+        # self.thresh - firing threshold
+        # self.s - self output (temporal coded)
+        # Where are the weights? These are presynaptic. The x_temporal we 
+        # receive here is post synaptic, and already scaled by synaptic weight.
+        # Therefore each neuron just needs to integrate over time and threshold.
+        self.cumulative_inputs += torch.squeeze(x)
+        new_spikes = (self.cumulative_inputs >= self.threshold) and not self.new_mask
+        if (self.counter == self.timesteps):
+            self.new_mask = self.pointwise_inhibition() # Apply inhibition to self.s
+        super().forward(x)
 
 
-		
+        self.s
+
+
+    def reset_state_variables(self) -> None:
+        self.cumulative_inputs.zero()
+        self.s.zero()
+        super.reset_state_variables()
+
+    # Apply pointwise inhibition to computed spike outputs
+    def pointwise_inhibition(self) -> None:
+        if not self.inhibition or self.num_winners >= self.n:
+            return
+        
+
+        '''
+        self.output_sums = torch.reshape(torch.sum(self.s, self.s.dim()-1), \
+            (self.n))
+        flattened_spikes = torch.reshape(torch.s, (self.n, self.timesteps))
+        # First to fire will have higher output sum:
+        indices = torch.argsort(self.output_sums, descending=True)
+        # Use indices to clear neuron outputs from 
+        # num_winners to n:
+        losing_indices = indices[self.num_winners:]
+        flattened_spikes[losing_indices,:] = 0
+        self.s = torch.reshape(flattened_spikes, (*self.shape, self.timesteps)) 
+        '''
+
+        
 class TNN_STDP(LearningRule):
     # language=rst
     """
@@ -138,8 +146,8 @@ class TNN_STDP(LearningRule):
     The weights are modified based on the presynaptic spikes 
     (held by the connection object) and the output spikes 
     (output by the TNN nodes object) AFTER WTA is applied.
-   	Based on the causal relationship of an input and output spike, 
-   	the weights are increased in strength or decreased.
+    Based on the causal relationship of an input and output spike, 
+    the weights are increased in strength or decreased.
     """
 
     def __init__(
@@ -150,7 +158,7 @@ class TNN_STDP(LearningRule):
         usearch: float,
         ubackoff: float,
         umin: float,
-       	maxweight: float, 
+        maxweight: float, 
         nu: Optional[Union[float, Sequence[float]]] = None,
         reduction: Optional[callable] = None,
         weight_decay: float = 0.0,
@@ -220,11 +228,11 @@ class TNN_STDP(LearningRule):
         bcast_x = torch.zeros(desired_size)
         # For each elem in y, x needs to be copied across the 2nd dimension of bcast_x 
         for i in range( y_slice.numel() ):
-        	bcast_x[:,i] = x_slice
+            bcast_x[:,i] = x_slice
 
         # and for each elem in x, y must be copied across the 1st dimension of bcast_y
         for i in range(x_slice.numel()):
-        	bcast_y[i,:] = y_slice
+            bcast_y[i,:] = y_slice
 
         # Conditions for weight updates:
         A = bcast_x == self.maxweight

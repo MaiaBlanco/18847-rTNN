@@ -90,6 +90,7 @@ tnn_layer_1 = TemporalNeurons( \
 	n=tnn_layer_sz, \
 	timesteps=num_timesteps, \
 	threshold=tnn_thresh, \
+	shape=(1,tnn_layer_sz), \
 	num_winners=tnn_layer_sz\
 	)
 
