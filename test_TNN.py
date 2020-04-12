@@ -90,14 +90,13 @@ tnn_layer_1 = TemporalNeurons( \
 	n=tnn_layer_sz, \
 	timesteps=num_timesteps, \
 	threshold=tnn_thresh, \
-	shape=(1,tnn_layer_sz), \
 	num_winners=tnn_layer_sz\
 	)
 
 C1 = Connection( 
 	source=input_layer,
 	target=tnn_layer_1,
-	w = 0.5 * torch.randn(input_layer.n, tnn_layer_1.n),
+	w = 0.5 * torch.rand(input_layer.n, tnn_layer_1.n),
 	update_rule=TNN_STDP,
 	ucapture = 	10/128,
 	uminus =	10/128,
@@ -143,8 +142,10 @@ for (i, dataPoint) in pbar:
 	label = dataPoint["label"]
 	pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
 
-	network.run(inputs={"I": datum}, time=time, input_time_dim=-1)
-	training_pairs.append([spikes["TNN_1"].get("s").sum(-1), label])
+	network.run(inputs={"I": datum}, time=time)
+	print("SPIKES:")
+	# print(spikes["TNN_1"].get("s"))
+	# training_pairs.append([spikes["TNN_1"].get("s").int().squeeze(), label])
 
 	if plot:
 

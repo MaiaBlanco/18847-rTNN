@@ -107,9 +107,11 @@ class TemporalNeurons(Nodes):
         self.cumulative_inputs += torch.squeeze(x)
         self.output_history[self.counter,:] = (self.cumulative_inputs >= self.threshold)
         self.counter += 1
+        print(torch.flatten(x))
+        print(self.cumulative_inputs)
+        print(self.output_sums)
         if (self.counter == self.timesteps):
             self.s = self.pointwise_inhibition() # Apply inhibition to self.s 
-            print(x)
             print(self.s)
         super().forward(x)
 
@@ -125,13 +127,8 @@ class TemporalNeurons(Nodes):
         self.output_sums = torch.squeeze(torch.sum(self.output_history, 0))
         if not self.inhibition or self.num_winners >= self.n:
             return self.output_sums >= 1
-            print("STUCK HERE")
-            return
 
         # Take output history and sum over time (1st dimension)
-        print("SHAPE")
-        print(output_sums.shape)
-        print("SHAPE")
         # flatten remaining dimensions in output_sums so it's a vector
         flattened_spikes = torch.flatten(self.output_sums)
         # First to fire will have higher output sum:
@@ -199,9 +196,8 @@ class TNN_STDP(LearningRule):
         self.counter = 0
         self.timesteps = timesteps
         #trand.manual_seed(0)        # set seed for determinism
-        self.input_spikes = torch.IntTensor((timesteps, *self.connection.source.shape))
-        self.output_spikes = torch.IntTensor((timesteps, *self.connection.target.shape))
-
+        self.input_spikes = torch.zeros((timesteps, *self.connection.source.shape) , dtype=torch.int)
+        self.output_spikes = torch.zeros((timesteps, *self.connection.target.shape), dtype=torch.int)
 
 
     def update(self, **kwargs) -> None:
@@ -210,21 +206,26 @@ class TNN_STDP(LearningRule):
         Abstract method for a learning rule update.
         """
         print("COUNTER IN UPDATE: ", self.counter)
-        self.input_spikes[self.counter, :] = self.connection.source.s
-        self.output_spikes[self.counter, :] = self.connection.target.s
+        print(self.input_spikes.shape)
+        print(self.output_spikes.shape)
+
+        print(torch.flatten(self.connection.source.s).shape)
+        print(torch.flatten(self.connection.target.s).shape)
+        self.input_spikes[self.counter, :] = torch.flatten(self.connection.source.s)
+        self.output_spikes[self.counter, :] = torch.flatten(self.connection.target.s)
         self.counter += 1
         if (self.counter == self.timesteps):
             self.counter = 0
             weights = self.connection.w.view( (self.connection.source.n, self.connection.target.n) )
-
+            old_weights = torch.clone(weights)
             # Copied from lab 1 in spyketorch:
             # Find when input spike occurred (if at all) for each input channel 
             # and receptive field row and column:
-            x_times = torch.flatten(int(self.maxweight) - torch.sum(input_spikes.int(), 0))
+            x_times = torch.flatten(int(self.maxweight) - torch.sum(self.input_spikes.int(), 0))
             # ^ should have shape connection.source.shape
 
             # Do the same for outputs (max weight = number of time steps):
-            y_times = torch.flatten(int(self.maxweight) - torch.sum(output_spikes.int(), 0))
+            y_times = torch.flatten(int(self.maxweight) - torch.sum(self.output_spikes.int(), 0))
             # ^ should have shape connection.target.shape
 
             # Get tensor for umin
@@ -261,12 +262,10 @@ class TNN_STDP(LearningRule):
             # 4. A ^ !B             decrease weight with P=backoff
             # 5. A ^ B              No change
 
-            # Get weights patch:
-            weights_patch = torch.clone(weights).float()
             
             # Need 2 sets of probabilities for increment and decrement:
-            probs_plus = torch.zeros_like(weights_patch).float()
-            probs_minus = torch.zeros_like(weights_patch).float()
+            probs_plus = torch.zeros_like(weights).float()
+            probs_minus = torch.zeros_like(weights).float()
             probs_plus[~A & ~B & ~C] = self.ucapture
             probs_minus[~A & ~B & C] = self.uminus
             probs_plus[~A & B] = self.usearch
@@ -279,7 +278,11 @@ class TNN_STDP(LearningRule):
 
             # Division costs a lot more than multiply, so compute the inverse once:
             inv_max_weight = 1/self.maxweight
-            F_probs_ratio = torch.mul(weights_patch, inv_max_weight)
+            F_probs_ratio = torch.mul(weights, inv_max_weight)
+            #print("PROBS:")
+            #print(F_probs_ratio)
+            #print("WEIGHTS:")
+            #print(weights)
 
             # Compute F +/- probabilities 
             F_minus_probs = (1-F_probs_ratio) * (1+F_probs_ratio)
@@ -292,14 +295,17 @@ class TNN_STDP(LearningRule):
             F_plus = torch.max(F_plus, umin_bernoulli)
             F_minus = torch.max(F_minus, umin_bernoulli)
 
-            # Apply updates to weights patch (ewise add)
-            weights_patch = torch.add(weights_patch, bernoulli_frame_plus * F_plus)
-            weights_patch = torch.add(weights_patch, -1 * bernoulli_frame_minus * F_minus)
+            # Apply updates to weights (ewise add)
+            weights = torch.add(weights, bernoulli_frame_plus * F_plus)
+            weights = torch.add(weights, -1 * bernoulli_frame_minus * F_minus)
 
             # Clamp outputs to range
-            torch.clamp_(weights_patch, 0, self.maxweight)
 
+            torch.clamp_(weights, 0, self.maxweight)
+
+            #print(old_weights)
+            #print(weights)
             # Assign updated weights back to layer
-            self.connection.w = weights_patch.int()
+            # self.connection.w = weights_patch.int()
 
         super().update()
