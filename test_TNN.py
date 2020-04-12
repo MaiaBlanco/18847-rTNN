@@ -90,7 +90,7 @@ tnn_layer_1 = TemporalNeurons( \
 	n=tnn_layer_sz, \
 	timesteps=num_timesteps, \
 	threshold=tnn_thresh, \
-	num_winners=tnn_layer_sz\
+	num_winners=1\
 	)
 
 C1 = Connection( 

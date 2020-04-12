@@ -109,7 +109,7 @@ class TemporalNeurons(Nodes):
         self.counter += 1
         print(torch.flatten(x))
         print(self.cumulative_inputs)
-        print(self.output_sums)
+        print(self.output_history)
         if (self.counter == self.timesteps):
             self.s = self.pointwise_inhibition() # Apply inhibition to self.s 
             print(self.s)
@@ -131,12 +131,15 @@ class TemporalNeurons(Nodes):
         # Take output history and sum over time (1st dimension)
         # flatten remaining dimensions in output_sums so it's a vector
         flattened_spikes = torch.flatten(self.output_sums)
+        print(flattened_spikes)
         # First to fire will have higher output sum:
         indices = torch.argsort(flattened_spikes, descending=True)
+        print(indices)
         # Use indices to clear neuron outputs from 
         # num_winners to n:
         losing_indices = indices[self.num_winners:]
-        flattened_spikes[losing_indices:] = 0
+        print(losing_indices)
+        flattened_spikes[losing_indices] = 0
         return torch.reshape(flattened_spikes >= 1, self.shape) 
 
         
