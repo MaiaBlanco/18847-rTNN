@@ -137,12 +137,14 @@ class TemporalNeurons(Nodes):
         #print('SHAPE=', self.s.shape)
         max_val = flattened_spikes.max(dim=0)[0] # get the spike time of the winner
         idx = (flattened_spikes==max_val).nonzero() # get indices of possible winners
-        if(idx.flatten().size()[0] < self.num_winners):
-            temp_winners = idx.flatten().size()[0]
-        else:
-            temp_winners = self.num_winners
-        winner_idx = np.random.choice(idx.squeeze(),replace=False,size=temp_winners) # randomly choose a winner
 
+        if(idx.flatten().size()[0] < self.num_winners):
+            winner_idx = idx.flatten().squeeze()
+        else:
+            winner_idx = np.random.choice(idx.flatten(),replace=False,size=self.num_winners) # randomly choose a winner
+
+        #print(winner_idx)
+        #input()
         self.s[:,winner_idx] = 1
 
 
