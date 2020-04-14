@@ -309,10 +309,9 @@ class TNN_STDP(LearningRule):
 
             weights.clamp_(0, self.maxweight)
 
-            print(old_weights)
-            print(weights)
-            print(self.connection.w)
-            input()
+            #print(old_weights)
+            #print(weights)
+            #print(self.connection.w)
             # pdb.set_trace()
             # self.connection.w = weights
             # Assign updated weights back to layer
