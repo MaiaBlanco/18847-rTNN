@@ -302,15 +302,19 @@ class TNN_STDP(LearningRule):
             F_minus = torch.max(F_minus, umin_bernoulli)
 
             # Apply updates to weights (ewise add)
-            weights = torch.add(weights, bernoulli_frame_plus * F_plus)
-            weights = torch.add(weights, -1 * bernoulli_frame_minus * F_minus)
+            weights.add_(bernoulli_frame_plus * F_plus)
+            weights.add_(-1 * bernoulli_frame_minus * F_minus)
 
             # Clamp outputs to range
 
-            torch.clamp_(weights, 0, self.maxweight)
+            weights.clamp_(0, self.maxweight)
 
-            #print(old_weights)
-            #print(weights)
+            print(old_weights)
+            print(weights)
+            print(self.connection.w)
+            input()
+            # pdb.set_trace()
+            # self.connection.w = weights
             # Assign updated weights back to layer
             # self.connection.w = weights_patch.int()
 
