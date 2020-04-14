@@ -178,7 +178,8 @@ for (i, dataPoint) in pbar:
 		#	ims=spike_ims,
 		#)
 		weights_im = plot_weights(
-			get_square_weights(C1.w, 23, 28), im=weights_im, wmin=-2, wmax=2
+			get_square_weights(C1.w, 23, 28), 
+			im=weights_im, wmin=0, wmax=maxweight
 		)
 
 		plt.pause(1e-8)
