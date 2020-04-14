@@ -76,6 +76,7 @@ input_size = 28*28
 tnn_layer_sz = 5
 num_timesteps = 8
 tnn_thresh = 32
+max_weight = num_timesteps
 
 time = num_timesteps
 dt = num_timesteps
@@ -109,7 +110,7 @@ C1 = Connection(
 	ubackoff = 	96/128,
 	umin = 		4/128,
 	timesteps = num_timesteps,
-	maxweight = num_timesteps
+	maxweight = max_weight
 	)
 
 network.add_layer(input_layer, name="I")
@@ -159,9 +160,7 @@ for (i, dataPoint) in pbar:
 	pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
 
 	network.run(inputs={"I": datum}, time=time)
-	print("SPIKES:")
-	# print(spikes["TNN_1"].get("s"))
-	# training_pairs.append([spikes["TNN_1"].get("s").int().squeeze(), label])
+	training_pairs.append([spikes["TNN_1"].get("s").int().squeeze(), label])
 
 	if plot:
 
@@ -172,14 +171,14 @@ for (i, dataPoint) in pbar:
 			axes=inpt_axes,
 			ims=inpt_ims,
 		)
-		#spike_ims, spike_axes = plot_spikes(
-		#	{layer: spikes[layer].get("s").view(-1, time) for layer in spikes},
-		#	axes=spike_axes,
-		#	ims=spike_ims,
-		#)
+		spike_ims, spike_axes = plot_spikes(
+			{layer: spikes[layer].get("s").view(-1, time) for layer in spikes},
+			axes=spike_axes,
+			ims=spike_ims,
+		)
 		weights_im = plot_weights(
 			get_square_weights(C1.w, 23, 28), 
-			im=weights_im, wmin=0, wmax=maxweight
+			im=weights_im, wmin=0, wmax=max_weight
 		)
 
 		plt.pause(1e-8)

@@ -97,7 +97,7 @@ class TemporalNeurons(Nodes):
     # Since this class handles multiple neurons, the input tensor
     # has dimensionality num_neurons x time.
     def forward(self, x) -> None:
-        print("COUNTER IN TNN LAYER: ", self.counter)
+        # print("COUNTER IN TNN LAYER: ", self.counter)
         # self.v - voltages
         # self.thresh - firing threshold
         # self.s - self output (temporal coded)
@@ -105,14 +105,14 @@ class TemporalNeurons(Nodes):
         # receive here is post synaptic, and already scaled by synaptic weight.
         # Therefore each neuron just needs to integrate over time and threshold.
         self.cumulative_inputs += torch.squeeze(x)
-        self.output_history[self.counter,:] = (self.cumulative_inputs >= self.threshold)
+        self.output_history[self.counter,(self.cumulative_inputs >= self.threshold)] = 1
         self.counter += 1
-        print(torch.flatten(x))
-        print(self.cumulative_inputs)
-        print(self.output_history)
+        # print(torch.flatten(x))
+        # print(self.cumulative_inputs)
+        # print(self.output_history)
         if (self.counter == self.timesteps):
-            self.s = self.pointwise_inhibition() # Apply inhibition to self.s 
-            print(self.s)
+            self.pointwise_inhibition() # Apply inhibition to self.s 
+            #print(self.s)
         super().forward(x)
 
     def reset_state_variables(self) -> None:
@@ -126,21 +126,24 @@ class TemporalNeurons(Nodes):
     def pointwise_inhibition(self) -> None:
         self.output_sums = torch.squeeze(torch.sum(self.output_history, 0))
         if not self.inhibition or self.num_winners >= self.n:
-            return self.output_sums >= 1
+            self.s[self.output_sums >= 1] = 1
 
         # Take output history and sum over time (1st dimension)
         # flatten remaining dimensions in output_sums so it's a vector
         flattened_spikes = torch.flatten(self.output_sums)
-        print(flattened_spikes)
+        #print(flattened_spikes)
         # First to fire will have higher output sum:
         indices = torch.argsort(flattened_spikes, descending=True)
-        print(indices)
+        #print(indices)
         # Use indices to clear neuron outputs from 
         # num_winners to n:
         losing_indices = indices[self.num_winners:]
-        print(losing_indices)
+        #print(losing_indices)
         flattened_spikes[losing_indices] = 0
-        return torch.reshape(flattened_spikes >= 1, self.shape) 
+        set_indices = torch.reshape(flattened_spikes >= 1, self.shape) 
+        #print(set_indices.shape)
+        #print(self.s.shape)
+        self.s[set_indices.unsqueeze(0)] = 1
 
         
 class TNN_STDP(LearningRule):
@@ -208,12 +211,12 @@ class TNN_STDP(LearningRule):
         """
         Abstract method for a learning rule update.
         """
-        print("COUNTER IN UPDATE: ", self.counter)
-        print(self.input_spikes.shape)
-        print(self.output_spikes.shape)
+        #print("COUNTER IN UPDATE: ", self.counter)
+        #print(self.input_spikes.shape)
+        #print(self.output_spikes.shape)
 
-        print(torch.flatten(self.connection.source.s).shape)
-        print(torch.flatten(self.connection.target.s).shape)
+        #print(torch.flatten(self.connection.source.s).shape)
+        #print(torch.flatten(self.connection.target.s).shape)
         self.input_spikes[self.counter, :] = torch.flatten(self.connection.source.s)
         self.output_spikes[self.counter, :] = torch.flatten(self.connection.target.s)
         self.counter += 1
