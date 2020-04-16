@@ -202,7 +202,8 @@ for (i, dataPoint) in pbar:
 	
 	count += 1
 	out = torch.sum(spikes["TNN_1"].get("s").int().squeeze(), dim=0)
-	temp = torch.nonzero(time - out)
+
+	temp = torch.nonzero(out)
 	
 	if temp.size(0) != 0:
 		table[temp[0][0], label] += 1
