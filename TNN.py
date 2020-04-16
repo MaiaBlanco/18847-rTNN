@@ -126,7 +126,7 @@ class TemporalNeurons(Nodes):
     def pointwise_inhibition(self) -> None:
         self.output_sums = torch.squeeze(torch.sum(self.output_history, 0))
         if not self.inhibition or self.num_winners >= self.n:
-            self.s[self.output_sums >= 1] = 1
+            self.s[(self.output_sums >= 1).unsqueeze(0)] = 1
 
         # Take output history and sum over time (1st dimension)
         # flatten remaining dimensions in output_sums so it's a vector
