@@ -11,7 +11,7 @@ from time import time as t
 from tqdm import tqdm
 
 from bindsnet.datasets import MNIST
-from bindsnet.encoding import SingleEncoder
+from bindsnet.encoding import RankOrderEncoder
 from bindsnet.network import Network
 from bindsnet.network.monitors import Monitor
 from bindsnet.network.nodes import Input
@@ -73,10 +73,11 @@ gpu = args.gpu
 device_id =  0#args.device_id
 
 input_size = 28*28
-tnn_layer_sz = 5
-num_timesteps = 8
-tnn_thresh = 32
+tnn_layer_sz = 10
+num_timesteps = 16
+tnn_thresh = 128
 max_weight = num_timesteps
+num_winners = 1 
 
 time = num_timesteps
 gpu = False
@@ -95,13 +96,13 @@ tnn_layer_1 = TemporalNeurons( \
 	n=tnn_layer_sz, \
 	timesteps=num_timesteps, \
 	threshold=tnn_thresh, \
-	num_winners=1\
+	num_winners=num_winners\
 	)
 
 C1 = Connection( 
 	source=input_layer,
 	target=tnn_layer_1,
-	w = 0.5 * torch.rand(input_layer.n, tnn_layer_1.n),
+	w = 0.5 * max_weight * torch.rand(input_layer.n, tnn_layer_1.n),
 	update_rule=TNN_STDP,
 	ucapture = 	10/128,
 	uminus =	10/128,
@@ -122,7 +123,7 @@ for l in network.layers:
 	network.add_monitor(spikes[l], name="%s_spikes" % l)
 
 dataset = MNIST(
-	SingleEncoder(time=num_timesteps, dt=1),
+	RankOrderEncoder(time=num_timesteps, dt=1),
 	None,
 	root=os.path.join("..", "..", "data", "MNIST"),
 	download=True,
