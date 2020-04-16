@@ -182,3 +182,40 @@ for (i, dataPoint) in pbar:
 
 		plt.pause(1e-8)
 	network.reset_state_variables()
+
+# TEST LOOP
+table = torch.zeros((tnn_layer_sz, 10))
+pred = torch.zeros(tnn_layer_sz)
+totals = torch.zeros(tnn_layer_sz)
+count = 0
+
+pbar = tqdm(enumerate(dataloader))
+for (i, dataPoint) in pbar:
+	if i > n_iters:
+		break
+	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)#.to(device_id)
+	label = dataPoint["label"]
+	pbar.set_description_str("Test progress: (%d / %d)" % (i, n_iters))
+
+	network.run(inputs={"I": datum}, time=time)
+	#training_pairs.append([spikes["TNN_1"].get("s").int().squeeze(), label])
+	
+	count += 1
+	out = torch.sum(spikes["TNN_1"].get("s").int().squeeze(), dim=0)
+	temp = torch.nonzero(time - out)
+	
+	if temp.size(0) != 0:
+		table[temp[0][0], label] += 1
+
+	network.reset_state_variables()
+
+print("\n\n Confusion Matrix:")
+print(table)
+
+maxval = torch.max(table, 1)[0]
+totals = torch.sum(table, 1)
+pred = torch.sum(maxval)
+covg_cnt = torch.sum(totals)
+
+print("Purity: ", pred/covg_cnt)
+print("Coverage: ", covg_cnt/count)
