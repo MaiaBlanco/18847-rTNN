@@ -79,7 +79,6 @@ tnn_thresh = 32
 max_weight = num_timesteps
 
 time = num_timesteps
-dt = num_timesteps
 gpu = False
 
 if gpu and torch.cuda.is_available():
@@ -172,7 +171,7 @@ for (i, dataPoint) in pbar:
 			ims=inpt_ims,
 		)
 		spike_ims, spike_axes = plot_spikes(
-			{layer: spikes[layer].get("s").view(-1, time) for layer in spikes},
+			{layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
 			axes=spike_axes,
 			ims=spike_ims,
 		)
