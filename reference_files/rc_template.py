@@ -27,6 +27,7 @@ from bindsnet.network.monitors import Monitor
 from bindsnet.network.nodes import LIFNodes
 from bindsnet.network.topology import Connection
 from bindsnet.utils import get_square_weights
+from TNN import *
 
 # Parse command line arguments
 parser = argparse.ArgumentParser()
@@ -45,6 +46,8 @@ parser.add_argument("--gpu", dest="gpu", action="store_true")
 parser.add_argument("--device_id", type=int, default=0)
 parser.set_defaults(plot=True, gpu=True, train=True)
 args = parser.parse_args()
+
+
 seed = args.seed
 n_neurons = args.n_neurons
 n_epochs = args.n_epochs
@@ -61,6 +64,12 @@ gpu = args.gpu
 #device_id = args.device_id
 device_id = 0                   # Set to CPU only
 
+input_size = 28*28
+tnn_layer_sz = 30
+num_timesteps = 8
+tnn_thresh = 12
+max_weight = num_timesteps
+time = num_timesteps
 # Set up seeds for application
 np.random.seed(seed)
 torch.manual_seed(seed)
@@ -70,10 +79,31 @@ torch.manual_seed(seed)
 network = Network(dt=dt)
 inpt = Input(784, shape=(1, 28, 28))
 network.add_layer(inpt, name="I")
-output = LIFNodes(n_neurons, thresh=-52 + np.random.randn(n_neurons).astype(float))             # n_neurons 500
+output = TemporalNeurons( \
+	n=tnn_layer_sz, \
+	timesteps=num_timesteps, \
+	threshold=tnn_thresh, \
+	num_winners=1\
+	)           # n_neurons 500
 network.add_layer(output, name="O")
-C1 = Connection(source=inpt, target=output, w=0.5 * torch.randn(inpt.n, output.n))
-C2 = Connection(source=output, target=output, w=0.5 * torch.randn(output.n, output.n))
+C1 = Connection(source=inpt, target=output, w=0.5 * torch.randn(inpt.n, output.n),
+    ucapture=10/128,
+	uminus =	10/128,
+	usearch = 	1/128,
+	ubackoff = 	96/128,
+	umin = 		4/128,
+	timesteps = num_timesteps,
+	maxweight = max_weight)
+
+C2 = Connection(source=output, target=output, w=0.5 * torch.randn(output.n, output.n) ,
+    ucapture=10/128,
+	uminus =	10/128,
+	usearch = 	1/128,
+	ubackoff = 	96/128,
+	umin = 		4/128,
+	timesteps = num_timesteps,
+	maxweight = max_weight)
+
 network.add_connection(C1, source="I", target="O")
 network.add_connection(C2, source="O", target="O")
 
@@ -84,12 +114,12 @@ for l in network.layers:
     network.add_monitor(spikes[l], name="%s_spikes" % l)
 
 # Set up voltage monitors
-voltages = {"O": Monitor(network.layers["O"], ["v"], time=time)}
-network.add_monitor(voltages["O"], name="O_voltages")
+# voltages = {"O": Monitor(network.layers["O"], ["v"], time=time)}
+# network.add_monitor(voltages["O"], name="O_voltages")
 
 # Get MNIST training images and labels.
 dataset = MNIST(
-    RankOrderEncoder(time=time, dt=dt),         # Originally was Poisson 
+    RankOrderEncoder(time=time, dt=dt),         # Originally was Poisson
     None,
     root=os.path.join("..", "..", "data", "MNIST"),
     download=True,
@@ -141,11 +171,11 @@ for (i, dataPoint) in pbar:
             axes=spike_axes,
             ims=spike_ims,
         )
-        voltage_ims, voltage_axes = plot_voltages(
-            {layer: voltages[layer].get("v").view(-1, time) for layer in voltages},
-            ims=voltage_ims,
-            axes=voltage_axes,
-        )
+        # voltage_ims, voltage_axes = plot_voltages(
+        #     {layer: voltages[layer].get("v").view(-1, time) for layer in voltages},
+        #     ims=voltage_ims,
+        #     axes=voltage_axes,
+        # )
         weights_im = plot_weights(
             get_square_weights(C1.w, 23, 28), im=weights_im, wmin=-2, wmax=2
         )
@@ -171,7 +201,7 @@ class NN(nn.Module):
 
 
 # Create and train logistic regression model on reservoir outputs.
-model = NN(n_neurons, 10)
+model = NN(tnn_layer_sz,10)
 criterion = torch.nn.MSELoss(reduction="sum")
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
 
@@ -202,11 +232,12 @@ pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
     if i > n_iters:
         break
+
     datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
     label = dataPoint["label"]
     pbar.set_description_str("Testing progress: (%d / %d)" % (i, n_iters))
 
-    network.run(inputs={"I": datum}, time=250, input_time_dim=1)
+    network.run(inputs={"I": datum}, time=time, input_time_dim=1)
     test_pairs.append([spikes["O"].get("s").sum(0), label])
 
     if plot:
@@ -218,15 +249,15 @@ for (i, dataPoint) in pbar:
             ims=inpt_ims,
         )
         spike_ims, spike_axes = plot_spikes(
-            {layer: spikes[layer].get("s").view(-1, 250) for layer in spikes},
+            {layer: spikes[layer].get("s").view(-1, time) for layer in spikes},
             axes=spike_axes,
             ims=spike_ims,
         )
-        voltage_ims, voltage_axes = plot_voltages(
-            {layer: voltages[layer].get("v").view(-1, 250) for layer in voltages},
-            ims=voltage_ims,
-            axes=voltage_axes,
-        )
+        # voltage_ims, voltage_axes = plot_voltages(
+        #     {layer: voltages[layer].get("v").view(-1, 250) for layer in voltages},
+        #     ims=voltage_ims,
+        #     axes=voltage_axes,
+        # )
         weights_im = plot_weights(
             get_square_weights(C1.w, 23, 28), im=weights_im, wmin=-2, wmax=2
         )
