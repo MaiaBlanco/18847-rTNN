@@ -13,12 +13,89 @@ from time import time as t
 # Get base class to implement our own neuron type
 from bindsnet.network.nodes import Nodes
 from bindsnet.network.topology import AbstractConnection, Connection
+from bindsnet.network.monitors import AbstractMonitor
+from bindsnet.learning.reward import AbstractReward
+from bindsnet.network.network import Network
 from bindsnet.learning import LearningRule
 
 from abc import ABC, abstractmethod
 from functools import reduce
 from operator import mul
-from typing import Iterable, Optional, Union, Sequence
+from typing import Dict, Iterable, Optional, Union, Sequence
+
+class TemporalBufferNeurons(Nodes):
+    """
+    Neuron sub-class based on Nodes base class in bindsNet
+
+    This neuron type is meant to enable synchronous-recurrent connections between 
+    TemporalNeurons (defined below).
+    Methods are:
+    * initialization to set the neuron parameters
+    * forward method to take in and buffer TEMPORAL inputs in the input,
+     and output the temporally-encoded spikes received at the same time step 
+     in the previous wave of computation.
+    """
+
+    def __init__(
+        self, 
+        n: Optional[int] = None,
+        shape: Optional[Iterable[int]] = None,
+        timesteps: int = 10,
+        # Boilerplate inputs that I don't care about:
+        traces: bool = False,
+        traces_additive: bool = False,
+        tc_trace: Union[float, torch.Tensor] = 20.0,
+        trace_scale: Union[float, torch.Tensor] = 10.0,
+        sum_input: bool = False, 
+        thresh: Union[int, torch.Tensor] = 8,
+        **kwargs,
+        ) -> None:
+
+        super().__init__(
+            n=n,
+            shape=shape,
+            traces=False, 
+            traces_additive=False,
+            tc_trace=tc_trace,
+            trace_scale=trace_scale,
+            sum_input=False,    
+        )
+
+        # NOTE: neuron weights are initialized in the Connection class, 
+        # which then handles pre- to post-synaptic scaling of inputs.
+        # Set number of timesteps (this is also the threshold if otherwise not set)
+        self.timesteps = timesteps
+    
+        # There already is a bytetensor in the base class called s for spikes
+        # but here we need buffers for inputs and outputs over time 
+        self.register_buffer("buffer1", 
+            torch.zeros((self.timesteps, *self.shape), dtype=torch.int8))
+        self.register_buffer("buffer2", 
+            torch.zeros((self.timesteps, *self.shape), dtype=torch.int8))
+        self.tick=False
+        self.counter = 0 # To keep track of time
+
+    def forward(self, x) -> None:
+        self.s.zero_()
+        if not self.tick:
+            self.s[:,self.buffer2[self.counter,:] > 0] = 1
+            self.buffer1[self.counter,:] = x.clone()
+        else:
+            self.s[:,self.buffer1[self.counter,:] > 0] = 1
+            self.buffer2[self.counter,:] = x.clone()
+        print()
+        print("X: ",x)
+        print("S: ", self.s)
+        self.counter += 1
+        if (self.counter == self.timesteps):
+            print("BUF1: ", self.buffer1)
+            print("BUF2: ", self.buffer2)
+        super().forward(x)
+
+    def reset_state_variables(self) -> None:
+        self.tick = not self.tick
+        self.counter = 0
+        super().reset_state_variables()
 
 class TemporalNeurons(Nodes):
     """
@@ -343,3 +420,138 @@ class TNN_STDP(LearningRule):
             # self.connection.w = weights_patch.int()
 
         super().update()
+
+# '''
+# Modified network class from bindsnet.
+# The modification here is that it detects if a source set of neurons is temporal, 
+# and passes along the correct spike set at each simulation time step.
+# '''
+# class TemporalNetwork(Network):
+#     def _get_inputs(self, layers: Iterable = None) -> Dict[str, torch.Tensor]:
+#         inputs = {}
+
+#         if layers is None:
+#             layers = self.layers
+
+#         # Loop over network connections.
+#         for c in self.connections:
+#             if c[1] in layers:
+#                 # Fetch source and target populations.
+#                 source = self.connections[c].source
+#                 target = self.connections[c].target
+
+#                 if not c[1] in inputs:
+#                     inputs[c[1]] = torch.zeros(
+#                         self.batch_size, *target.shape, device=target.s.device
+#                     )
+
+#                 # Add to input: source's spikes multiplied by connection weights.
+#                 inputs[c[1]] += self.connections[c].compute(source.s)
+
+#         return inputs
+
+#     def run(
+#         self, inputs: Dict[str, torch.Tensor], time: int, one_step=False, **kwargs
+#     ) -> None:
+#         # Parse keyword arguments.
+#         clamps = kwargs.get("clamp", {})
+#         unclamps = kwargs.get("unclamp", {})
+#         masks = kwargs.get("masks", {})
+#         injects_v = kwargs.get("injects_v", {})
+
+#         # Compute reward.
+#         if self.reward_fn is not None:
+#             kwargs["reward"] = self.reward_fn.compute(**kwargs)
+
+#         # Dynamic setting of batch size.
+#         if inputs != {}:
+#             for key in inputs:
+#                 # goal shape is [time, batch, n_0, ...]
+#                 if len(inputs[key].size()) == 1:
+#                     # current shape is [n_0, ...]
+#                     # unsqueeze twice to make [1, 1, n_0, ...]
+#                     inputs[key] = inputs[key].unsqueeze(0).unsqueeze(0)
+#                 elif len(inputs[key].size()) == 2:
+#                     # current shape is [time, n_0, ...]
+#                     # unsqueeze dim 1 so that we have
+#                     # [time, 1, n_0, ...]
+#                     inputs[key] = inputs[key].unsqueeze(1)
+
+#             for key in inputs:
+#                 # batch dimension is 1, grab this and use for batch size
+#                 if inputs[key].size(1) != self.batch_size:
+#                     self.batch_size = inputs[key].size(1)
+
+#                     for l in self.layers:
+#                         self.layers[l].set_batch_size(self.batch_size)
+
+#                     for m in self.monitors:
+#                         self.monitors[m].reset_state_variables()
+
+#                 break
+
+#         # Effective number of timesteps.
+#         timesteps = int(time / self.dt)
+
+#         # Simulate network activity for `time` timesteps.
+#         for t in range(timesteps):
+#             # Get input to all layers (synchronous mode).
+#             current_inputs = {}
+#             if not one_step:
+#                 current_inputs.update(self._get_inputs())
+
+#             for l in self.layers:
+#                 # Update each layer of nodes.
+#                 if l in inputs:
+#                     if l in current_inputs:
+#                         current_inputs[l] += inputs[l][t]
+#                     else:
+#                         current_inputs[l] = inputs[l][t]
+
+#                 if one_step:
+#                     # Get input to this layer (one-step mode).
+#                     current_inputs.update(self._get_inputs(layers=[l]))
+
+#                 self.layers[l].forward(x=current_inputs[l])
+
+#                 # Clamp neurons to spike.
+#                 clamp = clamps.get(l, None)
+#                 if clamp is not None:
+#                     if clamp.ndimension() == 1:
+#                         self.layers[l].s[:, clamp] = 1
+#                     else:
+#                         self.layers[l].s[:, clamp[t]] = 1
+
+#                 # Clamp neurons not to spike.
+#                 unclamp = unclamps.get(l, None)
+#                 if unclamp is not None:
+#                     if unclamp.ndimension() == 1:
+#                         self.layers[l].s[unclamp] = 0
+#                     else:
+#                         self.layers[l].s[unclamp[t]] = 0
+
+#                 # Inject voltage to neurons.
+#                 inject_v = injects_v.get(l, None)
+#                 if inject_v is not None:
+#                     if inject_v.ndimension() == 1:
+#                         self.layers[l].v += inject_v
+#                     else:
+#                         self.layers[l].v += inject_v[t]
+
+#             # Run synapse updates.
+#             for c in self.connections:
+#                 self.connections[c].update(
+#                     mask=masks.get(c, None), learning=self.learning, **kwargs
+#                 )
+
+#             # Get input to all layers.
+#             current_inputs.update(self._get_inputs())
+
+#             # Record state variables of interest.
+#             for m in self.monitors:
+#                 self.monitors[m].record()
+
+#         # Re-normalize connections.
+#         for c in self.connections:
+#             self.connections[c].normalize()
+
