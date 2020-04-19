@@ -68,33 +68,43 @@ class TemporalBufferNeurons(Nodes):
     
         # There already is a bytetensor in the base class called s for spikes
         # but here we need buffers for inputs and outputs over time 
-        self.register_buffer("buffer1", 
-            torch.zeros((self.timesteps, *self.shape), dtype=torch.int8))
-        self.register_buffer("buffer2", 
-            torch.zeros((self.timesteps, *self.shape), dtype=torch.int8))
+        #self.register_buffer("buffer1", 
+        #    torch.zeros((self.timesteps, *self.shape)))#, dtype=torch.int8))
+        #self.register_buffer("buffer2", 
+        #    torch.zeros((self.timesteps, *self.shape)))#, dtype=torch.int8))
+        self.buffer1 = torch.zeros((self.timesteps, *self.shape), dtype=torch.int8)
+        self.buffer2 = torch.zeros((self.timesteps, *self.shape), dtype=torch.int8)
+        
         self.tick=False
         self.counter = 0 # To keep track of time
 
     def forward(self, x) -> None:
-        self.s.zero_()
-        if not self.tick:
-            self.s[:,self.buffer2[self.counter,:] > 0] = 1
-            self.buffer1[self.counter,:] = x.clone()
-        else:
-            self.s[:,self.buffer1[self.counter,:] > 0] = 1
-            self.buffer2[self.counter,:] = x.clone()
-        print()
-        print("X: ",x)
-        print("S: ", self.s)
+        # self.s.zero_()
+        # if not self.tick:
+        #    self.s = torch.unsqueeze(self.buffer2[self.counter,:], 0)
+        #    self.buffer1[self.counter,:] = x.clone()
+        # else:
+        #if (self.counter > 4):
+        #    self.s = torch.tensor([[0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,1,1,1,1,1]], dtype=torch.int8)# = torch.unsqueeze(self.buffer1[self.counter,:], 0)
+        #else:
+        # self.s = torch.unsqueeze(self.buffer1[self.counter,:], 0)
+        self.s[0,:] = self.buffer1[self.counter,:]
+            #torch.zeros((1,*self.shape), dtype=torch.int8)# = torch.unsqueeze(self.buffer1[self.counter,:], 0)
+        self.buffer2[self.counter,:] = x #.clone()
+        # print()
+        # print("X: ",x)
         self.counter += 1
-        if (self.counter == self.timesteps):
-            print("BUF1: ", self.buffer1)
-            print("BUF2: ", self.buffer2)
+        # if (self.counter == self.timesteps):
+        #     print("BUF1: ", self.buffer1)
+        #     print("BUF2: ", self.buffer2)
+        #     print("S: ", self.s)
         super().forward(x)
 
     def reset_state_variables(self) -> None:
         self.tick = not self.tick
         self.counter = 0
+        self.buffer1 = self.buffer2
+        # self.buffer2.zero_();
         super().reset_state_variables()
 
 class TemporalNeurons(Nodes):

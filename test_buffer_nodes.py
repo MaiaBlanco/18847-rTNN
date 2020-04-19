@@ -62,11 +62,11 @@ gpu = args.gpu
 device_id =  0#args.device_id
 
 input_size = 28*28
-tnn_layer_sz = 20
-num_timesteps = 8
-tnn_thresh = num_timesteps/2
-max_weight = num_timesteps/2
-num_winners = tnn_layer_sz
+tnn_layer_sz = 15
+num_timesteps = 16
+tnn_thresh = 5 #num_timesteps/2
+max_weight = num_timesteps*2
+num_winners = 2 #tnn_layer_sz
 
 time = num_timesteps
 gpu = False
@@ -96,11 +96,11 @@ buffer_layer_1 = TemporalBufferNeurons(
 C1 = Connection( 
 	source=input_layer,
 	target=tnn_layer_1,
-	w = 0.5 * max_weight * torch.rand(input_layer.n, tnn_layer_1.n),
+	w = 0.01 * max_weight * torch.rand(input_layer.n, tnn_layer_1.n),
 	update_rule=TNN_STDP,
 	ucapture = 	10/128,
-	uminus =	40/128,
-	usearch = 	1/128,
+	uminus =	10/128,
+	usearch = 	2/128,
 	ubackoff = 	96/128,
 	umin = 		4/128,
 	timesteps = num_timesteps,
@@ -131,8 +131,8 @@ buf_to_TNN = Connection(
 	w = 0 * torch.rand(tnn_layer_1.n, tnn_layer_1.n),
 	update_rule=TNN_STDP,
 	ucapture = 	10/128,
-	uminus =	40/128,
-	usearch = 	1/128,
+	uminus =	10/128,
+	usearch = 	2/128,
 	ubackoff = 	96/128,
 	umin = 		4/128,
 	timesteps = num_timesteps,
@@ -143,10 +143,10 @@ buf_to_TNN = Connection(
 network.add_layer(input_layer, name="I")
 network.add_layer(tnn_layer_1, name="TNN_1")
 network.add_layer(buffer_layer_1, name="BUF")
-network.add_connection(C1, source="I", target="TNN_1") 
 # network.add_connection(C2, source="TNN_1", target="TNN_1") 
-network.add_connection(TNN_to_buf, source="TNN_1", target="BUF")
 network.add_connection(buf_to_TNN, source="BUF", target="TNN_1")
+network.add_connection(TNN_to_buf, source="TNN_1", target="BUF")
+network.add_connection(C1, source="I", target="TNN_1") 
 
 spikes = {}
 for l in network.layers:
@@ -193,8 +193,8 @@ for (i, dataPoint) in pbar:
 	network.run(inputs={"I": datum}, time=time)
 	training_pairs.append([spikes["TNN_1"].get("s").int().squeeze(), label])
 
+	# plot = False
 	if plot:
-
 		inpt_axes, inpt_ims = plot_input(
 			dataPoint["image"].view(28, 28),
 			datum.view(time, 784).sum(0).view(28, 28),
@@ -210,7 +210,10 @@ for (i, dataPoint) in pbar:
 		for axis in spike_axes:
 			axis.set_xticks(range(time))
 			axis.set_xticklabels(range(time))	
-		# plt.xticks(range(time), range(time))
+		for l,a in zip(network.layers, spike_axes):
+			a.set_yticks(range(network.layers[l].n))
+			# a.set_yticklabels(range(network.layers[l].n))
+
 		weights_im = plot_weights(
 			get_square_weights(C1.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28), 
 			im=weights_im, wmin=0, wmax=max_weight
@@ -218,9 +221,9 @@ for (i, dataPoint) in pbar:
 		weights_im2 = plot_weights(
 			C2.w, im=weights_im2, wmin=-max_weight, wmax=0
 		)
-		plt.pause(1e-12)
-		if (torch.sum(spikes["TNN_1"].get("s").view(-1)) > 0):
-			input()
+	plt.pause(1e-12)
+	# if (torch.sum(spikes["TNN_1"].get("s").view(-1)) > 0):
+	# input()
 	network.reset_state_variables()
 
 # TEST LOOP
