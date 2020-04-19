@@ -2,83 +2,102 @@ import numpy as np
 import torch
 from matplotlib import pyplot as plt
 from torch.distributions.bernoulli import Bernoulli
+from torch.distributions.uniform import Uniform
 from torchvision.datasets import MNIST
 from tqdm import tqdm
 
 
 class TNN:
-  def __init__(self, w, n_neurons, threshold, timesteps):
-    self.w = w
-    self.n_neurons = n_neurons
-    self.threshold = threshold
-    self.timesteps = timesteps
-  
-  def forward(self, X):
-    Yspikes = torch.zeros((self.timesteps, X.shape[1], self.n_neurons))  # output spike train
-    for t in range(self.timesteps):
-      X_t = X[t,:,:]
-      Yspikes[t,:,:] = torch.mm(X_t, self.w)
-    '''
-    for t in range(timesteps):
-      X_t = X[t,:,:,:] # take a splice across time
-      Yspikes[t,:,:] = torch.mm(X_t, self.w)
-    
-    potentials = torch.sum(Yspikes, axis=1)
-    Yspikes[Yspikes < threshold] = 0
-    Yspikes[Yspikes >= threshold] = 1
-    Ytimes = timesteps-torch.sum(Yspikes,axis=1)
+    def __init__(self, w_shape, n_neurons, threshold, timesteps):
+        self.n_neurons = n_neurons
+        self.threshold = threshold
+        self.timesteps = timesteps
+        #self._init_w(w_shape)
+        self.w = torch.zeros(w_shape).int()
 
-    # apply k-WTA inhibition
-    idx = np.lexsort((-potentials.numpy(),Ytimes.numpy()))
-    loser_idx = idx[k:] # indexes of the num_neurons-k losers
-    Ytimes[loser_idx]=timesteps
-    Yspikes[loser_idx,:]=0
-    return [Yspikes, Ytimes]'''
-    return Yspikes
+    # initialize TNN weights using a uniform normal distribution
+    def _init_w(self, shape):
+        low = 0.0
+        high = 2
+        init_w_distr = Uniform(torch.tensor([low]), torch.tensor([high]))
+        self.w = init_w_distr.sample(sample_shape=shape).squeeze().int()
+        return
 
-  def STDP(Xtimes, Ytimes, num_neurons, w, wmax, timesteps):
+    def print_w(self):
+        print(self.w)
 
-    # probabilities
-    ucapture = Bernoulli(torch.tensor([10/128]))
-    uminus = Bernoulli(torch.tensor([10/128]))
-    usearch = Bernoulli(torch.tensor([1/128]))
-    ubackoff = Bernoulli(torch.tensor([96/128]))
-    umin = Bernoulli(torch.tensor([4/128]))
+    def forward(self, X):
+        # output spike train
+        Yspikes = torch.zeros((self.timesteps, X.shape[1], self.n_neurons))
+        for t in range(self.timesteps):
+            X_t = X[t, :, :].int()
+            Yspikes[t, :, :] = torch.matmul(X_t, self.w)
 
-    new_w = -1*torch.ones(w.shape)
+        # threshold
+        Yspikes[Yspikes < self.threshold] = 0
+        Yspikes[Yspikes >= self.threshold] = 1
 
-    for n in range(num_neurons):
-        y = Ytimes[n]
-        y = y.repeat(Xtimes.shape[0],Xtimes.shape[1],Xtimes.shape[2])
-        w_n = w[:,:,:,n]
+        Yspikes = self.wta_inhibibition(Yspikes)
+        Ytimes = self.timesteps - Yspikes.sum(dim=0)
+        return Ytimes
 
-        fplus = Bernoulli((w_n/wmax)*(2-(w_n/wmax))).sample()
-        fminus = Bernoulli((1-(w_n/wmax))*(1+(w_n/wmax))).sample()
-        ucapture_sample = ucapture.sample(sample_shape=w_n.size()).squeeze()
-        uminus_sample = uminus.sample(sample_shape=w_n.size()).squeeze()
-        usearch_sample = usearch.sample(sample_shape=w_n.size()).squeeze()
-        ubackoff_sample = ubackoff.sample(sample_shape=w_n.size()).squeeze()
+    def wta_inhibibition(self, Yspikes):
+        Ytimes = Yspikes.sum(0)
+        max_val = Ytimes.max(dim=1)[0] # get the spike time of the winner
+        idx = (Ytimes==max_val).nonzero() # get indices of possible winners
+        winner_idx = np.random.randint(0, len(idx)) # randomly choose a winner
+        result = torch.zeros(Yspikes.shape)
+        result[:, :, winner_idx] = Yspikes[:, :, winner_idx]
+        return result
 
-        umin_sample1 = umin.sample(sample_shape=w_n.shape).squeeze()
-        umin_sample2 = umin.sample(sample_shape=w_n.shape).squeeze()
-        umin_sample3 = umin.sample(sample_shape=w_n.shape).squeeze()
-        umin_sample4 = umin.sample(sample_shape=w_n.shape).squeeze()
+    def stdp(self, Xtimes, Ytimes):
+        w_max = self.timesteps
+        w_shape = self.w.shape
+        self.w = self.w.float()  # cast the weight matrix as a float just for this function
 
-        b1_cond_true =  w_n + ucapture_sample*torch.max(fplus,umin_sample1)
-        b1 = torch.where((Xtimes < timesteps) & (y < timesteps) & (Xtimes <= y), b1_cond_true,w_n)
+        # probability parameters for the relevant distributions
+        ucapture = Bernoulli(torch.tensor([10/128]))
+        uminus = Bernoulli(torch.tensor([10/128]))
+        usearch = Bernoulli(torch.tensor([1/128]))
+        ubackoff = Bernoulli(torch.tensor([106/128]))
+        umin = Bernoulli(torch.tensor([4/128]))
 
-        b2_cond_true = b1-uminus_sample*torch.max(fminus,umin_sample2)
-        b2 = torch.where((Xtimes < timesteps) & (y < timesteps) & (Xtimes > y), b2_cond_true,b1)
+        # samples from the above probability distributions, each with the same shape as the w matrix
+        ucapture_sample = ucapture.sample(sample_shape=w_shape).squeeze()
+        uminus_sample = uminus.sample(sample_shape=w_shape).squeeze()
+        usearch_sample = usearch.sample(sample_shape=w_shape).squeeze()
+        ubackoff_sample = ubackoff.sample(sample_shape=w_shape).squeeze()
 
-        b3_cond_true = b2 + usearch_sample*torch.max(fplus,umin_sample3)
-        b3 = torch.where((Xtimes < timesteps) & (y == timesteps), b3_cond_true,b2)
+        # 4 samples from the umin distribution, with the same shape as the w matrix
+        # we take 4 samples here for use in each of the 4 conditional branches of the STDP learning rule
+        umin_sample1 = umin.sample(sample_shape=w_shape).squeeze()
+        umin_sample2 = umin.sample(sample_shape=w_shape).squeeze()
+        umin_sample3 = umin.sample(sample_shape=w_shape).squeeze()
+        umin_sample4 = umin.sample(sample_shape=w_shape).squeeze()
 
-        b4_cond_true = b3-ubackoff_sample*torch.max(fminus,umin_sample4)
-        b4 = torch.where((Xtimes == timesteps) & (y < timesteps),b4_cond_true,b3)
-        
-        new_w[:,:,:,n] = b4.clone()
+        # here we define and sample from the F+ and F- distributions
+        fplus = Bernoulli((self.w.float()/w_max) * (2-(self.w.float()/w_max))).sample()
+        fminus = Bernoulli((1-(self.w.float()/w_max)) * (1+(self.w.float()/w_max))).sample()
 
-    # clamp weights within region
-    new_w[new_w > wmax] = wmax
-    new_w[new_w < 0] = 0
-    return new_w
+        # reshape Xtimes and Ytimes so that they are the same shape (namely the shape of the weight matrix)
+        # this is so that we can proceed with tensor processesing as opposed to iterating over the dimensions
+        n_res_neurons = Xtimes.shape[1]
+        Xtimes = Xtimes.transpose(0, 1).repeat(1, self.n_neurons)
+        Ytimes = Ytimes.repeat(n_res_neurons, 1)
+
+        # STDP LEARNING RULE (using tensor processing)
+        b1_cond_true = self.w + ucapture_sample*torch.max(fplus, umin_sample1)
+        self.w = torch.where((Xtimes < self.timesteps) & (Ytimes < self.timesteps) & (Xtimes <= Ytimes), b1_cond_true, self.w)
+
+        b2_cond_true = self.w-uminus_sample*torch.max(fminus, umin_sample2)
+        self.w = torch.where((Xtimes < self.timesteps) & (Ytimes < self.timesteps) & (Xtimes > Ytimes), b2_cond_true, self.w)
+
+        b3_cond_true = self.w + usearch_sample*torch.max(fplus, umin_sample3)
+        self.w = torch.where((Xtimes < self.timesteps) & (Ytimes == self.timesteps), b3_cond_true, self.w)
+
+        b4_cond_true = self.w-ubackoff_sample*torch.max(fminus, umin_sample4)
+        self.w = torch.where((Xtimes == self.timesteps) & (Ytimes < self.timesteps), b4_cond_true, self.w)
+
+        # cast the weight matrix back to an int, and clamp the weights within [0,wmax]
+        self.w = self.w.clamp(0, w_max).int()
+        return

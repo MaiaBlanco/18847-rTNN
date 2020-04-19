@@ -187,8 +187,8 @@ class TemporalNeurons(Nodes):
         # print(torch.flatten(x))
         # print(self.cumulative_inputs)
         # print(self.output_history)
-        if (self.counter == self.timesteps):
-            self.pointwise_inhibition() # Apply inhibition to self.s 
+        #if (self.counter == self.timesteps):
+        self.pointwise_inhibition() # Apply inhibition to self.s 
             #print(self.s)
         super().forward(x)
 
@@ -218,13 +218,7 @@ class TemporalNeurons(Nodes):
                 self.s[:,winner_idx] = 1
             elif(max_val > 0):
                 winner_idx = np.random.choice(idx.flatten(),replace=False,size=num_more_winners) # randomly choose a winner
-                self.s[:,winner_idx] = 1
-
-            print(self.output_sums)            
-            print(winner_idx)
-            print(self.s)
-            input()
-        
+                self.s[:,winner_idx] = 1        
 
             
 
