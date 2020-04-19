@@ -65,7 +65,7 @@ gpu = args.gpu
 #device_id = args.device_id
 device_id = 0                   # Set to CPU only
 
-input_size = 28*28
+input_size = 28*1
 tnn_layer_sz = 30
 num_timesteps = 8
 tnn_thresh = 12
@@ -78,7 +78,7 @@ torch.manual_seed(seed)
 # Create reservoir computing network
 # Described in BindsNet paper
 network = Network(dt=dt)
-inpt = Input(784, shape=(1, 28, 28))
+inpt = Input(28, shape=(1, 1, 28))
 network.add_layer(inpt, name="I")
 output = TemporalNeurons( \
 	n=tnn_layer_sz, \
@@ -154,8 +154,11 @@ for (i, dataPoint) in pbar:
     datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
     label = dataPoint["label"]
     pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
-
-    network.run(inputs={"I": datum}, time=time, input_time_dim=1)
+    # print(datum.shape)
+    # print(datum[:,:,:,0,:].shape)
+    for row in range(28):
+        #print('here')
+        network.run(inputs={"I": datum[:,:,:,row,:]}, time=time, input_time_dim=1)
     training_pairs.append([spikes["O"].get("s").sum(0), label])
 
     print(spikes['O'].get("s").view(time,-1))
@@ -228,7 +231,7 @@ for epoch, _ in pbar:
         "Epoch: %d/%d, Loss: %.4f"
         % (epoch + 1, n_epochs, avg_loss / len(training_pairs))
     )
-exit()
+
 n_iters = examples
 test_pairs = []
 pbar = tqdm(enumerate(dataloader))
@@ -240,7 +243,8 @@ for (i, dataPoint) in pbar:
     label = dataPoint["label"]
     pbar.set_description_str("Testing progress: (%d / %d)" % (i, n_iters))
 
-    network.run(inputs={"I": datum}, time=time, input_time_dim=1)
+    for row in range(28):
+        network.run(inputs={"I": datum[:,:,:,row,:]}, time=time, input_time_dim=1)
     test_pairs.append([spikes["O"].get("s").sum(0), label])
 
     if plot:
@@ -256,8 +260,6 @@ for (i, dataPoint) in pbar:
             axes=spike_axes,
             ims=spike_ims,
         )
-        print(spike_axes.shape)
-        exit()
         # voltage_ims, voltage_axes = plot_voltages(
         #     {layer: voltages[layer].get("v").view(-1, 250) for layer in voltages},
         #     ims=voltage_ims,
