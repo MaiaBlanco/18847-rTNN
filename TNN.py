@@ -178,15 +178,10 @@ class TemporalNeurons(Nodes):
         # Where are the weights? These are presynaptic. The x_temporal we 
         # receive here is post synaptic, and already scaled by synaptic weight.
         # Therefore each neuron just needs to integrate over time and threshold.
-        self.cumulative_inputs += torch.squeeze(x)
+        self.cumulative_inputs = torch.squeeze(x)
         self.output_history[self.counter,(self.cumulative_inputs >= self.threshold)] = 1
         self.counter += 1
-        # print(torch.flatten(x))
-        # print(self.cumulative_inputs)
-        # print(self.output_history)
-        #if (self.counter == self.timesteps):
         self.pointwise_inhibition() # Apply inhibition to self.s 
-            #print(self.s)
         if self.counter == self.timesteps:
             self.wave_reset()
         super().forward(x)
