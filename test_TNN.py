@@ -7,10 +7,8 @@ import torch
 import argparse
 import matplotlib.pyplot as plt
 from torchvision import transforms
-
 from time import time as t
 from tqdm import tqdm
-
 from bindsnet.datasets import MNIST
 from bindsnet.encoding import RankOrderEncoder
 from bindsnet.network import Network
@@ -26,11 +24,13 @@ from bindsnet.analysis.plotting import (
 	plot_conv2d_weights,
 	plot_voltages,
 )
-
 from TNN import *
+from SpykeTorch import snn
+from SpykeTorch import functional as sf
+from SpykeTorch import visualization as vis
+from SpykeTorch import utils
 
-print()
-
+# Command line parsing
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--n_epochs", type=int, default=1)
@@ -45,10 +45,7 @@ parser.add_argument("--plot", dest="plot", action="store_true")
 parser.add_argument("--gpu", dest="gpu", action="store_true")
 parser.add_argument("--device_id", type=int, default=0)
 parser.set_defaults(plot=False, gpu=False, train=True)
-
-
 args = parser.parse_args()
-
 seed = args.seed
 n_epochs = args.n_epochs
 n_test = args.n_test
@@ -59,25 +56,49 @@ intensity = args.intensity
 train = args.train
 plot = args.plot
 gpu = args.gpu
-device_id =  0#args.device_id
-
-input_size = 28*28
-tnn_layer_sz = 10
-num_timesteps = 16
-tnn_thresh = 128
-max_weight = num_timesteps
-num_winners = 1 
-
-time = num_timesteps
+device_id =  0
 gpu = False
-
 if gpu and torch.cuda.is_available():
     torch.cuda.set_device(device_id)
     # torch.set_default_tensor_type('torch.cuda.FloatTensor')
 else:
     torch.manual_seed(seed)
 
-# build network:
+# Parameters for TNN
+input_size = 28*28
+tnn_layer_sz = 10
+num_timesteps = 16
+tnn_thresh = 128
+max_weight = num_timesteps
+num_winners = 1 
+time = num_timesteps
+
+# SpykeTorch specific parameters for on-off encoding
+rf_size = 5 # Receptive field size that will be provided as input to the column
+startposition = 13 # Start position of the receptive field w.r.t. top left corner of image
+
+# On-Off Transform class for Image
+class PreProcTransform:
+    def __init__(self, filter, timesteps=num_timesteps):
+        self.to_tensor = transforms.ToTensor() # Convert to tensor
+        self.filter = filter # Apply OnOff filtering
+        self.temporal_transform = utils.Intensity2Latency(timesteps) # Convert pixel values to time
+                                                    # Higher value corresponds to earlier spiketime
+        self.crop = utils.Crop(startposition, rf_size) # Crop the image to form the receptive field
+        
+    def __call__(self, image):
+        image = self.to_tensor(image) * 255
+        image.unsqueeze_(0) # Adds a temporal dimension at the beginning
+        image = self.filter(image)
+        temporal_image = self.temporal_transform(image)
+        temporal_image = temporal_image.sign() # This will create spikes
+        return self.crop(temporal_image)
+
+kernels = [utils.OnKernel(3), utils.OffKernel(3)]
+filter = utils.Filter(kernels, padding = 2, thresholds = 50)
+preproc = PreProcTransform(filter)
+
+# TNN Network Build
 network = Network(dt=1)
 input_layer = Input(n=input_size)
 
@@ -121,6 +142,12 @@ dataset = MNIST(
 	),
 )
 
+# Added by Kyle for On-Off Encoding
+#dataset = MNIST(
+#	root=os.path.join("..", "..", "data", "MNIST"),
+#	download=True,
+#	transform=preproc,
+#)
 
 # Create a dataloader to iterate and batch data
 dataloader = torch.utils.data.DataLoader(

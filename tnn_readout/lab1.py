@@ -56,10 +56,14 @@ class PreProcTransform:
         return self.crop(temporal_image)
 
 kernels = [utils.OnKernel(3), utils.OffKernel(3)]
+# window size of 3
+print(kernels)
+print(len(kernels))
 inchannels = len(kernels)
 
 filter = utils.Filter(kernels, padding = 2, thresholds = 50)
 preproc = PreProcTransform(filter)
+#print(preproc())
 
 # Defining iterator for loading train and test data
 data_root = "data"
