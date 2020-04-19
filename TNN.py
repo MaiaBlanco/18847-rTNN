@@ -184,15 +184,12 @@ class TemporalNeurons(Nodes):
         self.cumulative_inputs += torch.squeeze(x)
         self.output_history[self.counter,(self.cumulative_inputs >= self.threshold)] = 1
         self.counter += 1
-        #print() print()
-        #print(self.counter)
         # print(torch.flatten(x))
-        #print(self.cumulative_inputs)
+        # print(self.cumulative_inputs)
         # print(self.output_history)
-        self.pointwise_inhibition() # Apply inhibition to self.s 
-        #if (self.counter == self.timesteps):
-        #    self.pointwise_inhibition() # Apply inhibition to self.s 
-        #    #print(self.s)
+        if (self.counter == self.timesteps):
+            self.pointwise_inhibition() # Apply inhibition to self.s 
+            #print(self.s)
         super().forward(x)
 
     def reset_state_variables(self) -> None:
@@ -207,46 +204,32 @@ class TemporalNeurons(Nodes):
         self.output_sums = torch.squeeze(torch.sum(self.output_history, 0))
         if not self.inhibition or self.num_winners >= self.n:
             self.s[(self.output_sums >= 1).unsqueeze(0)] = 1
-        # Take output history and sum over time (1st dimension)
-        # flatten remaining dimensions in output_sums so it's a vector
-        flattened_spikes = torch.flatten(self.output_sums)
-        # First to fire will have higher output sum:
-        indices = torch.argsort(flattened_spikes, descending=True)
-        # Use indices to clear neuron outputs from 
-        # num_winners to n:
-        losers = indices[self.num_winners:]
-        #print(losing_indices)
-        flattened_spikes[losers]  = 0
-        set_indices = torch.reshape(flattened_spikes >= 1, self.shape) 
-        #print(set_indices.shape)
-        #print(self.s.shape)
-        self.s[set_indices.unsqueeze(0)] = 1
 
+        # check how many more winners need to be selected
+        num_more_winners = self.num_winners - self.s.nonzero().size()[0]
+        if(num_more_winners>=0):
+            idx = (self.s==0).nonzero()[:,1] # get indices that are not already winners
+            flattened_spikes = torch.flatten(self.output_sums[idx])
+            max_val = flattened_spikes.max(dim=0)[0] # get the spike time of the winner
+            idx = (flattened_spikes==max_val).nonzero() # get indices of possible winners
+            winner_idx = self.s.size()[0]
+            if(max_val > 0 and idx.flatten().size()[0] <= num_more_winners):
+                winner_idx = idx.flatten().squeeze()
+                self.s[:,winner_idx] = 1
+            elif(max_val > 0):
+                winner_idx = np.random.choice(idx.flatten(),replace=False,size=num_more_winners) # randomly choose a winner
+                self.s[:,winner_idx] = 1
 
-'''
-        max_val = flattened_spikes.max(dim=0)[0] # get the spike time of the winner
-        idx = (flattened_spikes==max_val).nonzero() # get indices of possible winners
+            print(self.output_sums)            
+            print(winner_idx)
+            print(self.s)
+            input()
+        
 
-        if(idx.flatten().size()[0] < self.num_winners):
-            winner_idx = idx.flatten().squeeze()
-        else:
-            winner_idx = np.random.choice(idx.flatten(),replace=False,size=self.num_winners) # randomly choose a winner
+            
 
-        #print(winner_idx)
-        #input()
+        
 
-
-        #print(indices)
-        # Use indices to clear neuron outputs from 
-        # num_winners to n:
-        #losing_indices = indices[self.num_winners:]
-        #print(losing_indices)
-        #flattened_spikes[losing_indices] = 0
-        #set_indices = torch.reshape(flattened_spikes >= 1, self.shape) 
-        #print(set_indices.shape)
-        #print(self.s.shape)
-        #self.s[set_indices.unsqueeze(0)] = 1
-'''
         
 class TNN_STDP(LearningRule):
     # language=rst

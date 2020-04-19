@@ -67,10 +67,10 @@ else:
 # Parameters for TNN
 input_size = 28*28
 tnn_layer_sz = 10
-num_timesteps = 16
+num_timesteps = 64
 tnn_thresh = 128
 max_weight = num_timesteps
-num_winners = 1 
+num_winners = 4 
 time = num_timesteps
 
 # SpykeTorch specific parameters for on-off encoding
@@ -133,7 +133,7 @@ for l in network.layers:
 	network.add_monitor(spikes[l], name="%s_spikes" % l)
 
 dataset = MNIST(
-	RankOrderEncoder(time=num_timesteps, dt=1),
+	PoissonEncoder(time=num_timesteps, dt=1),
 	None,
 	root=os.path.join("..", "..", "data", "MNIST"),
 	download=True,
