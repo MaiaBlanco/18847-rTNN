@@ -66,13 +66,15 @@ else:
 
 # Parameters for TNN
 input_size = 28*28
-on_off_size = input_size * 2
-tnn_layer_sz = 10
+tnn_layer_sz = 40
 num_timesteps = 8 # 64
 tnn_thresh = 32
-max_weight = num_timesteps
-num_winners = 4 
+num_winners = 1						#10, 8, 24, 8, 2
+
 time = num_timesteps
+max_weight = num_timesteps
+on_off_size = input_size * 2
+
 
 # SpykeTorch specific parameters for on-off encoding
 rf_size = 28 # Receptive field size that will be provided as input to the column
