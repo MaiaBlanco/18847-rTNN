@@ -21,8 +21,8 @@ from bindsnet.utils import get_square_weights
 from bindsnet.analysis.plotting import (
 	plot_input,
 	plot_spikes,
-    plot_voltages,
-    plot_weights,
+	plot_voltages,
+	plot_weights,
 	plot_conv2d_weights,
 	plot_voltages,
 )
@@ -61,21 +61,21 @@ plot = args.plot
 gpu = args.gpu
 device_id =  0#args.device_id
 
-input_size = 28*28
+input_size = 28
 tnn_layer_sz = 15
 num_timesteps = 16
-tnn_thresh = 5 #num_timesteps/2
-max_weight = num_timesteps*2
+tnn_thresh = 4 #num_timesteps/2
+max_weight = num_timesteps*4
 num_winners = 2 #tnn_layer_sz
 
 time = num_timesteps
 gpu = False
 
 if gpu and torch.cuda.is_available():
-    torch.cuda.set_device(device_id)
-    # torch.set_default_tensor_type('torch.cuda.FloatTensor')
+	torch.cuda.set_device(device_id)
+	# torch.set_default_tensor_type('torch.cuda.FloatTensor')
 else:
-    torch.manual_seed(seed)
+	torch.manual_seed(seed)
 
 # build network:
 network = Network(dt=1)
@@ -100,7 +100,7 @@ C1 = Connection(
 	update_rule=TNN_STDP,
 	ucapture = 	10/128,
 	uminus =	10/128,
-	usearch = 	2/128,
+	usearch = 	4/128,
 	ubackoff = 	96/128,
 	umin = 		4/128,
 	timesteps = num_timesteps,
@@ -190,10 +190,26 @@ for (i, dataPoint) in pbar:
 	label = dataPoint["label"]
 	pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
 
-	network.run(inputs={"I": datum}, time=time)
-	training_pairs.append([spikes["TNN_1"].get("s").int().squeeze(), label])
 
-	# plot = False
+	for row in range(28):
+		#print('here')
+		network.run(inputs={"I": datum[:,:,:,row,:]}, time=time)
+
+		# plot = False
+		if plot:
+			spike_ims, spike_axes = plot_spikes(
+				{layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
+				axes=spike_axes,
+				ims=spike_ims,
+			)
+			for axis in spike_axes:
+				axis.set_xticks(range(time))
+				axis.set_xticklabels(range(time))	
+			for l,a in zip(network.layers, spike_axes):
+				a.set_yticks(range(network.layers[l].n))
+				# a.set_yticklabels(range(network.layers[l].n))
+			#input()
+			plt.pause(1e-12)
 	if plot:
 		inpt_axes, inpt_ims = plot_input(
 			dataPoint["image"].view(28, 28),
@@ -201,31 +217,17 @@ for (i, dataPoint) in pbar:
 			label=label,
 			axes=inpt_axes,
 			ims=inpt_ims,
-		)
-		spike_ims, spike_axes = plot_spikes(
-			{layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
-			axes=spike_axes,
-			ims=spike_ims,
-		)
-		for axis in spike_axes:
-			axis.set_xticks(range(time))
-			axis.set_xticklabels(range(time))	
-		for l,a in zip(network.layers, spike_axes):
-			a.set_yticks(range(network.layers[l].n))
-			# a.set_yticklabels(range(network.layers[l].n))
-
+			)
+			#get_square_weights(C1.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28), 
 		weights_im = plot_weights(
-			get_square_weights(C1.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28), 
+			C1.w,
 			im=weights_im, wmin=0, wmax=max_weight
 		)
-		weights_im2 = plot_weights(
-			C2.w, im=weights_im2, wmin=-max_weight, wmax=0
-		)
-	plt.pause(1e-12)
+		plt.pause(1e-12)
 	# if (torch.sum(spikes["TNN_1"].get("s").view(-1)) > 0):
 	# input()
 	network.reset_state_variables()
-
+'''
 # TEST LOOP
 table = torch.zeros((tnn_layer_sz, 10))
 pred = torch.zeros(tnn_layer_sz)
@@ -263,3 +265,4 @@ covg_cnt = torch.sum(totals)
 
 print("Purity: ", pred/covg_cnt)
 print("Coverage: ", covg_cnt/count)
+'''

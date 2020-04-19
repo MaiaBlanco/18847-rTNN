@@ -75,36 +75,23 @@ class TemporalBufferNeurons(Nodes):
         self.buffer1 = torch.zeros((self.timesteps, *self.shape), dtype=torch.int8)
         self.buffer2 = torch.zeros((self.timesteps, *self.shape), dtype=torch.int8)
         
-        self.tick=False
         self.counter = 0 # To keep track of time
 
     def forward(self, x) -> None:
-        # self.s.zero_()
-        # if not self.tick:
-        #    self.s = torch.unsqueeze(self.buffer2[self.counter,:], 0)
-        #    self.buffer1[self.counter,:] = x.clone()
-        # else:
-        #if (self.counter > 4):
-        #    self.s = torch.tensor([[0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,1,1,1,1,1]], dtype=torch.int8)# = torch.unsqueeze(self.buffer1[self.counter,:], 0)
-        #else:
-        # self.s = torch.unsqueeze(self.buffer1[self.counter,:], 0)
         self.s[0,:] = self.buffer1[self.counter,:]
-            #torch.zeros((1,*self.shape), dtype=torch.int8)# = torch.unsqueeze(self.buffer1[self.counter,:], 0)
         self.buffer2[self.counter,:] = x #.clone()
-        # print()
-        # print("X: ",x)
         self.counter += 1
-        # if (self.counter == self.timesteps):
-        #     print("BUF1: ", self.buffer1)
-        #     print("BUF2: ", self.buffer2)
-        #     print("S: ", self.s)
+        if (self.counter == self.timesteps):
+            self.wave_reset()
         super().forward(x)
 
-    def reset_state_variables(self) -> None:
-        self.tick = not self.tick
+    def wave_reset(self):
         self.counter = 0
         self.buffer1 = self.buffer2
-        # self.buffer2.zero_();
+    
+    def reset_state_variables(self) -> None:
+        self.buffer2.zero_()
+        self.wave_reset()
         super().reset_state_variables()
 
 class TemporalNeurons(Nodes):
@@ -200,13 +187,19 @@ class TemporalNeurons(Nodes):
         #if (self.counter == self.timesteps):
         self.pointwise_inhibition() # Apply inhibition to self.s 
             #print(self.s)
+        if self.counter == self.timesteps:
+            self.wave_reset()
         super().forward(x)
 
-    def reset_state_variables(self) -> None:
+    def wave_reset(self):
         self.cumulative_inputs.zero_()
         self.output_history.zero_()
         self.output_sums.zero_()
         self.counter = 0
+        self.s.zero_()
+
+    def reset_state_variables(self) -> None:
+        self.wave_reset()
         super().reset_state_variables()
 
 # Apply pointwise inhibition to computed spike outputs
