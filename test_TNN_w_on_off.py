@@ -187,7 +187,7 @@ for (i, dataPoint) in pbar:
 	off_image = torch.squeeze(off_image)
 	off_image = torch.unsqueeze(off_image, 1)
 	off_image = off_image.view(time, 1, input_size)
-	on_off_image = torch.cat((on_image, on_image), 2)
+	on_off_image = torch.cat((on_image, off_image), 2)
 	label = dataPoint["label"]
 	pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
 	print(on_off_image.shape)
@@ -227,7 +227,7 @@ for (i, dataPoint) in pbar:
 	off_image = torch.squeeze(off_image)
 	off_image = torch.unsqueeze(off_image, 1)
 	off_image = off_image.view(time, 1, input_size)
-	on_off_image = torch.cat((on_image, on_image), 2)
+	on_off_image = torch.cat((on_image, off_image), 2)
 	label = dataPoint["label"]
 	pbar.set_description_str("Test progress: (%d / %d)" % (i, n_iters))
 
