@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from torchvision import transforms
+import torch.nn.functional as fn
 from tqdm import tqdm
 
 from time import time as t
@@ -17,6 +18,7 @@ from bindsnet.network.monitors import AbstractMonitor
 from bindsnet.learning.reward import AbstractReward
 from bindsnet.network.network import Network
 from bindsnet.learning import LearningRule
+from bindsnet.encoding import Encoder
 
 from abc import ABC, abstractmethod
 from functools import reduce
@@ -396,137 +398,185 @@ class TNN_STDP(LearningRule):
 
         super().update()
 
-# '''
-# Modified network class from bindsnet.
-# The modification here is that it detects if a source set of neurons is temporal, 
-# and passes along the correct spike set at each simulation time step.
-# '''
-# class TemporalNetwork(Network):
-#     def _get_inputs(self, layers: Iterable = None) -> Dict[str, torch.Tensor]:
-#         inputs = {}
 
-#         if layers is None:
-#             layers = self.layers
 
-#         # Loop over network connections.
-#         for c in self.connections:
-#             if c[1] in layers:
-#                 # Fetch source and target populations.
-#                 source = self.connections[c].source
-#                 target = self.connections[c].target
+def ramp_no_leak(
+    datum: torch.Tensor, time: int, dt: float = 1.0, **kwargs
+) -> torch.Tensor:
+    # language=rst
+    """
+    Encodes data via a temporal (thermometer code) ramp-no-leak specification. 
+    One spike per neuron, but on for the rest of the timeline,
+    temporally ordered by decreasing intensity. Inputs must be non-negative.
 
-#                 if not c[1] in inputs:
-#                     inputs[c[1]] = torch.zeros(
-#                         self.batch_size, *target.shape, device=target.s.device
-#                     )
+    :param datum: Tensor of shape ``[n_samples, n_1, ..., n_k]``.
+    :param time: Length of rank order-encoded spike train per input variable.
+    :param dt: Simulation time step.
+    :return: Tensor of shape ``[time, n_1, ..., n_k]`` of rank order-encoded spikes.
+    """
+    assert (datum >= 0).all(), "Inputs must be non-negative"
 
-#                 # Add to input: source's spikes multiplied by connection weights.
-#                 inputs[c[1]] += self.connections[c].compute(source.s)
+    shape, size = datum.shape, datum.numel()
+    datum = datum.flatten()
+    timesteps = int(time / dt)
 
-#         return inputs
+    # Create spike times in order of decreasing intensity.
+    datum /= datum.max()
+    times = torch.ones(size) * timesteps
+    times -= torch.ceil(datum*timesteps).long()
 
-#     def run(
-#         self, inputs: Dict[str, torch.Tensor], time: int, one_step=False, **kwargs
-#     ) -> None:
-#         # Parse keyword arguments.
-#         clamps = kwargs.get("clamp", {})
-#         unclamps = kwargs.get("unclamp", {})
-#         masks = kwargs.get("masks", {})
-#         injects_v = kwargs.get("injects_v", {})
+    # Create spike times tensor.
+    spikes = torch.zeros(time, size).byte()
+    for i in range(timesteps):
+        spikes[i, times <= i] = 1
 
-#         # Compute reward.
-#         if self.reward_fn is not None:
-#             kwargs["reward"] = self.reward_fn.compute(**kwargs)
+    return spikes.reshape(time, *shape)
 
-#         # Dynamic setting of batch size.
-#         if inputs != {}:
-#             for key in inputs:
-#                 # goal shape is [time, batch, n_0, ...]
-#                 if len(inputs[key].size()) == 1:
-#                     # current shape is [n_0, ...]
-#                     # unsqueeze twice to make [1, 1, n_0, ...]
-#                     inputs[key] = inputs[key].unsqueeze(0).unsqueeze(0)
-#                 elif len(inputs[key].size()) == 2:
-#                     # current shape is [time, n_0, ...]
-#                     # unsqueeze dim 1 so that we have
-#                     # [time, 1, n_0, ...]
-#                     inputs[key] = inputs[key].unsqueeze(1)
+'''
+def ramp_no_leak_preproc(
+    datum: torch.Tensor, time: int, dt: float = 1.0, **kwargs
+) -> torch.Tensor:
+    # language=rst
+    """
+    Encodes data via a temporal (thermometer code) ramp-no-leak specification. 
+    One spike per neuron, but on for the rest of the timeline,
+    temporally ordered by decreasing intensity. Inputs must be non-negative.
 
-#             for key in inputs:
-#                 # batch dimension is 1, grab this and use for batch size
-#                 if inputs[key].size(1) != self.batch_size:
-#                     self.batch_size = inputs[key].size(1)
+    :param datum: Tensor of shape ``[n_samples, n_1, ..., n_k]``.
+    :param time: Length of rank order-encoded spike train per input variable.
+    :param dt: Simulation time step.
+    :return: Tensor of shape ``[time, n_1, ..., n_k]`` of rank order-encoded spikes.
+    """
+    preproc = kwargs['preproc']
+    preproc_datum = preproc(datum)
+    assert (preproc_datum >= 0).all(), "Inputs must be non-negative"
 
-#                     for l in self.layers:
-#                         self.layers[l].set_batch_size(self.batch_size)
+    shape, size = preproc_datum.shape, preproc_datum.numel()
+    preproc_datum = preproc_datum.flatten()
+    timesteps = int(time / dt)
 
-#                     for m in self.monitors:
-#                         self.monitors[m].reset_state_variables()
+    # Create spike times in order of decreasing intensity.
+    preproc_datum /= preproc_datum.max()
+    times = torch.ones(size) * timesteps
+    times -= torch.ceil(preproc_datum*timesteps).long()
 
-#                 break
+    # Create spike times tensor.
+    spikes = torch.zeros(time, size).byte()
+    for i in range(timesteps):
+        spikes[i, times <= i] = 1
 
-#         # Effective number of timesteps.
-#         timesteps = int(time / self.dt)
+    return spikes.reshape(time, *shape)
+'''
 
-#         # Simulate network activity for `time` timesteps.
-#         for t in range(timesteps):
-#             # Get input to all layers (synchronous mode).
-#             current_inputs = {}
-#             if not one_step:
-#                 current_inputs.update(self._get_inputs())
+'''
+# Kernel filters adapted from Hari's modifications to Spyketorch
+# returns a 2d tensor corresponding to the requested On filter
+def getOnKernel(window_size=3):
+    #onfilter = np.array([[-1.0,-1.0,-1.0],[-1.0,8.0,-1.0],[-1.0,-1.0,-1.0]])
+    mid = int((window_size-1)/2)
+    onfilter = np.ones((window_size,window_size))*-1.0
+    onfilter[mid][mid] = (window_size**2)-1
+    ontensor = torch.from_numpy(onfilter)
+    return ontensor.float()
 
-#             for l in self.layers:
-#                 # Update each layer of nodes.
-#                 if l in inputs:
-#                     if l in current_inputs:
-#                         current_inputs[l] += inputs[l][t]
-#                     else:
-#                         current_inputs[l] = inputs[l][t]
+# returns a 2d tensor corresponding to the requested Off filter
+def getOffKernel(window_size=3):
+    #offfilter = np.array([[1.0,1.0,1.0],[1.0,-8.0,1.0],[1.0,1.0,1.0]])
+    mid = int((window_size-1)/2)
+    offfilter = np.ones((window_size,window_size))
+    offfilter[mid][mid] = 1-(window_size**2)
+    offtensor = torch.from_numpy(offfilter)
+    return offtensor.float()
 
-#                 if one_step:
-#                     # Get input to this layer (one-step mode).
-#                     current_inputs.update(self._get_inputs(layers=[l]))
 
-#                 self.layers[l].forward(x=current_inputs[l])
+# Adapted from spyketorch
+class TNNFilter:
+    r"""Applies a filter transform. Each filter contains a sequence of :attr:`FilterKernel` objects.
+    The result of each filter kernel will be passed through a given threshold (if not :attr:`None`).
 
-#                 # Clamp neurons to spike.
-#                 clamp = clamps.get(l, None)
-#                 if clamp is not None:
-#                     if clamp.ndimension() == 1:
-#                         self.layers[l].s[:, clamp] = 1
-#                     else:
-#                         self.layers[l].s[:, clamp[t]] = 1
+    Args:
+        filter_kernels (sequence of FilterKernels): The sequence of filter kernels.
+        padding (int, optional): The size of the padding for the convolution of filter kernels. Default: 0
+        thresholds (sequence of floats, optional): The threshold for each filter kernel. Default: None
+        use_abs (boolean, optional): To compute the absolute value of the outputs or not. Default: False
 
-#                 # Clamp neurons not to spike.
-#                 unclamp = unclamps.get(l, None)
-#                 if unclamp is not None:
-#                     if unclamp.ndimension() == 1:
-#                         self.layers[l].s[unclamp] = 0
-#                     else:
-#                         self.layers[l].s[unclamp[t]] = 0
+    .. note::
 
-#                 # Inject voltage to neurons.
-#                 inject_v = injects_v.get(l, None)
-#                 if inject_v is not None:
-#                     if inject_v.ndimension() == 1:
-#                         self.layers[l].v += inject_v
-#                     else:
-#                         self.layers[l].v += inject_v[t]
+        The size of the compund filter kernel tensor (stack of individual filter kernels) will be equal to the 
+        greatest window size among kernels. All other smaller kernels will be zero-padded with an appropriate 
+        amount.
+    """
+    # filter_kernels must be a list of filter kernels
+    # thresholds must be a list of thresholds for each kernel
+    def __init__(self, filter_kernels, padding=0, thresholds=None, use_abs=False):
+        tensor_list = []
+        self.max_window_size = 0
+        for kernel in filter_kernels:
+            if isinstance(kernel, torch.Tensor):
+                tensor_list.append(kernel)
+                self.max_window_size = max(self.max_window_size, kernel.size(-1))
+            else:
+                tensor_list.append(kernel().unsqueeze(0))
+                self.max_window_size = max(self.max_window_size, kernel.window_size)
+        for i in range(len(tensor_list)):
+            if isinstance(kernel, torch.Tensor):
+                p = (self.max_window_size - filter_kernels[i].size(-1))//2
+            else:
+                p = (self.max_window_size - filter_kernels[i].window_size)//2
+            tensor_list[i] = fn.pad(tensor_list[i], (p,p,p,p))
 
-#             # Run synapse updates.
-#             for c in self.connections:
-#                 self.connections[c].update(
-#                     mask=masks.get(c, None), learning=self.learning, **kwargs
-#                 )
+        self.kernels = torch.stack(tensor_list)
+        self.number_of_kernels = len(filter_kernels)
+        self.padding = padding
+        if isinstance(thresholds, list):
+            self.thresholds = thresholds.clone().detach()
+            self.thresholds.unsqueeze_(0).unsqueeze_(2).unsqueeze_(3)
+        else:
+            self.thresholds = thresholds
+        self.use_abs = use_abs
 
-#             # Get input to all layers.
-#             current_inputs.update(self._get_inputs())
+    # returns a 4d tensor containing the flitered versions of the input image
+    # input is a 4d tensor. dim: (minibatch=1, filter_kernels, height, width)
+    def __call__(self, input):
+        print(self.kernels)
+        print(self.padding)
+        output = fn.conv2d(input.unsqueeze(0), self.kernels, padding = self.padding).float()
+        if not(self.thresholds is None):
+            output = torch.where(output < self.thresholds, torch.tensor(0.0, device=output.device), output)
+        if self.use_abs:
+            torch.abs_(output)
+        return output
+'''
+class RampNoLeakTNNEncoder(Encoder):
+    def __init__(self, time: int, dt: float = 1.0, **kwargs):
+        # language=rst
+        """
+        Creates a callable Ramp-No-Leak Encoder which 
+        temporally encodes inputs as defined in
+        :code:`ramp_no_leak`
 
-#             # Record state variables of interest.
-#             for m in self.monitors:
-#                 self.monitors[m].record()
+        :param time: Length of RampNoLeak spike train per input variable.
+        :param dt: Simulation time step.
+        """
+        super().__init__(time, dt=dt, **kwargs)
 
-#         # Re-normalize connections.
-#         for c in self.connections:
-#             self.connections[c].normalize()
+        self.enc = ramp_no_leak
+'''
+class OnOffTNNEncoder(Encoder):
+    def __init__(self, time: int, dt: float = 1.0, **kwargs):
+        # language=rst
+        """
+        Creates a callable Ramp-No-Leak Encoder which 
+        temporally encodes inputs as defined in
+        :code:`ramp_no_leak`
 
+        :param time: Length of RampNoLeak spike train per input variable.
+        :param dt: Simulation time step.
+        """
+        super().__init__(time, dt=dt, **kwargs)
+        self.preproc = kwargs['preproc']
+        if self.preproc is None:
+            self.enc = ramp_no_leak
+        else:
+            self.enc = ramp_no_leak_preproc
+'''
