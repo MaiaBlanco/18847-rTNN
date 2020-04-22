@@ -94,7 +94,7 @@ C1 = Connection(source=inpt, target=output, w=0.5 * torch.randn(inpt.n, output.n
 	usearch = 	4/128,
 	ubackoff = 	96/128,
 	umin = 		4/128,
-
+    update_rule=TNN_STDP,
 	timesteps = num_timesteps,
 	maxweight = max_weight)
 
@@ -104,7 +104,7 @@ C2 = Connection(source=output, target=output, w=0.5 * torch.randn(output.n, outp
 	usearch = 	4/128,
 	ubackoff = 	96/128,
 	umin = 		4/128,
-
+    update_rule=TNN_STDP,
 	timesteps = num_timesteps,
 	maxweight = max_weight)
 

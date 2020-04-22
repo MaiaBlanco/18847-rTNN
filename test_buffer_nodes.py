@@ -93,7 +93,7 @@ buffer_layer_1 = TemporalBufferNeurons(
 	timesteps = num_timesteps,
 	)
 
-C1 = Connection( 
+C1 = Connection(
 	source=input_layer,
 	target=tnn_layer_1,
 	w = 0.01 * max_weight * torch.rand(input_layer.n, tnn_layer_1.n),
@@ -109,7 +109,7 @@ C1 = Connection(
 
 w = torch.ones(tnn_layer_1.n, tnn_layer_1.n) \
 - torch.diag(torch.ones(tnn_layer_1.n))
-C2 = Connection( 
+C2 = Connection(
 	source=tnn_layer_1,
 	target=tnn_layer_1,
 	w = -max_weight * w,
@@ -118,14 +118,14 @@ C2 = Connection(
 
 w = torch.diag(torch.ones(tnn_layer_1.n))
 print(w)
-TNN_to_buf = Connection( 
+TNN_to_buf = Connection(
 	source=tnn_layer_1,
 	target=buffer_layer_1,
 	w = w,
 	update_rule=None
 	)
 
-buf_to_TNN = Connection( 
+buf_to_TNN = Connection(
 	source=buffer_layer_1,
 	target=tnn_layer_1,
 	w = 0 * torch.rand(tnn_layer_1.n, tnn_layer_1.n),
@@ -143,10 +143,10 @@ buf_to_TNN = Connection(
 network.add_layer(input_layer, name="I")
 network.add_layer(tnn_layer_1, name="TNN_1")
 network.add_layer(buffer_layer_1, name="BUF")
-# network.add_connection(C2, source="TNN_1", target="TNN_1") 
+# network.add_connection(C2, source="TNN_1", target="TNN_1")
 network.add_connection(buf_to_TNN, source="BUF", target="TNN_1")
 network.add_connection(TNN_to_buf, source="TNN_1", target="BUF")
-network.add_connection(C1, source="I", target="TNN_1") 
+network.add_connection(C1, source="I", target="TNN_1")
 
 spikes = {}
 for l in network.layers:
@@ -204,7 +204,7 @@ for (i, dataPoint) in pbar:
 			)
 			for axis in spike_axes:
 				axis.set_xticks(range(time))
-				axis.set_xticklabels(range(time))	
+				axis.set_xticklabels(range(time))
 			for l,a in zip(network.layers, spike_axes):
 				a.set_yticks(range(network.layers[l].n))
 				# a.set_yticklabels(range(network.layers[l].n))
@@ -218,7 +218,7 @@ for (i, dataPoint) in pbar:
 			axes=inpt_axes,
 			ims=inpt_ims,
 			)
-			#get_square_weights(C1.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28), 
+			#get_square_weights(C1.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28),
 		weights_im = plot_weights(
 			C1.w,
 			im=weights_im, wmin=0, wmax=max_weight

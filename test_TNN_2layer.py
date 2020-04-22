@@ -74,7 +74,7 @@ tnn_thresh = 256
 tnn_thresh_2 = num_timesteps
 max_weight = num_timesteps/2
 l2_max_weight = max_weight*8
-num_winners = 2
+num_winners = 1
 time = num_timesteps
 
 # TNN Network Build
@@ -217,7 +217,7 @@ plot=True
 pbar = tqdm(enumerate(dataloader))
 n_iters= 1000
 for (i, dataPoint) in pbar:
-	
+
 	if i > n_iters:
 		break
 	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)#.to(device_id)
@@ -229,7 +229,7 @@ for (i, dataPoint) in pbar:
 	# spikes[layer_name].get("s").view(time, -1).sum(0) 
     #output_history[sum_over_time]
 
-	if plot and i%100==0:
+	if plot and i%10==0:
 
 		inpt_axes, inpt_ims = plot_input(
 			dataPoint["image"].view(28, 28),
