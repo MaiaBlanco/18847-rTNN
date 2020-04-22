@@ -80,28 +80,28 @@ time = num_timesteps
 # TNN Network Build
 network = Network(dt=1)
 input_layer = Input(n=input_size)
-
-tnn_layer_1a = TemporalNeurons( 
-	n=tnn_layer_sz, 
-	timesteps=num_timesteps, 
-	threshold=tnn_thresh, 
+plot=True
+tnn_layer_1a = TemporalNeurons(
+	n=tnn_layer_sz,
+	timesteps=num_timesteps,
+	threshold=tnn_thresh,
 	num_winners=num_winners
 	)
-tnn_layer_1b = TemporalNeurons( 
-	n=tnn_layer_sz, 
-	timesteps=num_timesteps, 
-	threshold=tnn_thresh, 
+tnn_layer_1b = TemporalNeurons(
+	n=tnn_layer_sz,
+	timesteps=num_timesteps,
+	threshold=tnn_thresh,
 	num_winners=num_winners
 	)
 
-tnn_layer_2 = TemporalNeurons( 
-	n=tnn_layer_2_sz, 
-	timesteps=num_timesteps, 
-	threshold=tnn_thresh_2, 
+tnn_layer_2 = TemporalNeurons(
+	n=tnn_layer_2_sz,
+	timesteps=num_timesteps,
+	threshold=tnn_thresh_2,
 	num_winners=1
 	)
 
-T1a = Connection( 
+T1a = Connection(
 	source=input_layer,
 	target=tnn_layer_1a,
 	w = 0.5 * max_weight * torch.rand(input_layer.n, tnn_layer_1a.n),
@@ -114,7 +114,7 @@ T1a = Connection(
 	timesteps = num_timesteps,
 	maxweight = max_weight
 	)
-T1b = Connection( 
+T1b = Connection(
 	source=input_layer,
 	target=tnn_layer_1b,
 	w = 0.5 * max_weight * torch.rand(input_layer.n, tnn_layer_1b.n),
@@ -128,7 +128,7 @@ T1b = Connection(
 	maxweight = max_weight
 	)
 
-T2a = Connection( 
+T2a = Connection(
 	source=tnn_layer_1a,
 	target=tnn_layer_2,
 	w = 0.5 * max_weight * torch.rand(tnn_layer_1a.n, tnn_layer_2.n),
@@ -141,7 +141,7 @@ T2a = Connection(
 	timesteps = num_timesteps,
 	maxweight = l2_max_weight
 	)
-T2b = Connection( 
+T2b = Connection(
 	source=tnn_layer_1b,
 	target=tnn_layer_2,
 	w = 0.5 * max_weight * torch.rand(tnn_layer_1b.n, tnn_layer_2.n),
@@ -159,10 +159,11 @@ network.add_layer(input_layer, name="I")
 network.add_layer(tnn_layer_1a, name="TNN_1a")
 network.add_layer(tnn_layer_1b, name="TNN_1b")
 network.add_layer(tnn_layer_2, name="TNN_2")
-network.add_connection(T1a, source="I", target="TNN_1a") 
-network.add_connection(T1b, source="I", target="TNN_1b") 
-network.add_connection(T2a, source="TNN_1a", target="TNN_2") 
-network.add_connection(T2b, source="TNN_1b", target="TNN_2") 
+network.add_connection(T1a, source="I", target="TNN_1a")
+network.add_connection(T1b, source="I", target="TNN_1b")
+network.add_connection(T2a, source="TNN_1a", target="TNN_2")
+network.add_connection(T2b, source="TNN_1b", target="TNN_2")
+
 
 spikes = {}
 for l in network.layers:
@@ -209,13 +210,14 @@ for (i, dataPoint) in pbar:
 	pbar.set_description_str("Pre-train progress: (%d / %d)" % (i, n_iters))
 
 	network.run(inputs={"I": datum}, time=time)
-	
-	network.reset_state_variables()
 
+	network.reset_state_variables()
+plot=True
 # training_pairs = []
 pbar = tqdm(enumerate(dataloader))
 n_iters= 1000
 for (i, dataPoint) in pbar:
+	
 	if i > n_iters:
 		break
 	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)#.to(device_id)
@@ -224,6 +226,8 @@ for (i, dataPoint) in pbar:
 
 	network.run(inputs={"I": datum}, time=time)
 	# training_pairs.append([spikes["TNN_2"].get("s").int().squeeze(), label])
+	# spikes[layer_name].get("s").view(time, -1).sum(0) 
+    #output_history[sum_over_time]
 
 	if plot and i%100==0:
 
@@ -242,17 +246,17 @@ for (i, dataPoint) in pbar:
 		if (i == 0):
 			for axis in spike_axes:
 				axis.set_xticks(range(time))
-				axis.set_xticklabels(range(time))	
-			
+				axis.set_xticklabels(range(time))
+
 			for l,a in zip(network.layers, spike_axes):
-				a.set_yticks(range(network.layers[l].n))	
+				a.set_yticks(range(network.layers[l].n))
 
 		weights_im = plot_weights(
-			get_square_weights(T1a.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28), 
+			get_square_weights(T1a.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28),
 			im=weights_im, wmin=0, wmax=max_weight
 		)
 		weights_im2 = plot_weights(
-			T2a.w, 
+			T2a.w,
 			im=weights_im2, wmin=0, wmax=l2_max_weight
 		)
 
@@ -281,12 +285,12 @@ for (i, dataPoint) in pbar:
 
 	network.run(inputs={"I": datum}, time=time)
 	#training_pairs.append([spikes["TNN_1"].get("s").int().squeeze(), label])
-	
+
 	count += 1
 	out = torch.sum(spikes["TNN_2"].get("s").int().squeeze(), dim=0)
 
 	temp = torch.nonzero(out)
-	
+
 	if temp.size(0) != 0:
 		table[temp[0][0], label] += 1
 
