@@ -66,11 +66,11 @@ else:
 
 # Parameters for TNN
 input_size = 28*28
-tnn_layer_sz = 10
-num_timesteps = 64
+tnn_layer_sz = 25
+num_timesteps = 256
 tnn_thresh = 128
-max_weight = num_timesteps
-num_winners = 4 
+max_weight = num_timesteps/2
+num_winners = 1 
 time = num_timesteps
 
 # SpykeTorch specific parameters for on-off encoding
@@ -116,7 +116,7 @@ C1 = Connection(
 	update_rule=TNN_STDP,
 	ucapture = 	10/128,
 	uminus =	10/128,
-	usearch = 	1/128,
+	usearch = 	4/128,
 	ubackoff = 	96/128,
 	umin = 		4/128,
 	timesteps = num_timesteps,
@@ -133,7 +133,7 @@ for l in network.layers:
 	network.add_monitor(spikes[l], name="%s_spikes" % l)
 
 dataset = MNIST(
-	PoissonEncoder(time=num_timesteps, dt=1),
+	RampNoLeakTNNEncoder(time=num_timesteps, dt=1),
 	None,
 	root=os.path.join("..", "..", "data", "MNIST"),
 	download=True,
@@ -166,6 +166,18 @@ voltage_axes = None
 
 
 n_iters = examples
+pbar = tqdm(enumerate(dataloader))
+for (i, dataPoint) in pbar:
+	if i > n_iters:
+		break
+	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)#.to(device_id)
+	label = dataPoint["label"]
+	pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
+
+	network.run(inputs={"I": datum}, time=time)
+
+
+n_iters = 10
 training_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
@@ -201,6 +213,7 @@ for (i, dataPoint) in pbar:
 	network.reset_state_variables()
 
 # TEST LOOP
+n_iters = examples
 table = torch.zeros((tnn_layer_sz, 10))
 pred = torch.zeros(tnn_layer_sz)
 totals = torch.zeros(tnn_layer_sz)
