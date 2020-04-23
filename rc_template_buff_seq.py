@@ -31,9 +31,9 @@ print()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
-parser.add_argument("--n_epochs", type=int, default=50)
+parser.add_argument("--n_epochs", type=int, default=500)
 parser.add_argument("--n_test", type=int, default=10000)
-parser.add_argument("--examples", type=int, default=10000)
+parser.add_argument("--examples", type=int, default=1000)
 parser.add_argument("--time", type=int, default=50)
 parser.add_argument("--dt", type=int, default=1.0)
 parser.add_argument("--intensity", type=float, default=128.0)
@@ -62,20 +62,19 @@ device_id =  0#args.device_id
 input_size = 28
 tnn_layer_sz = 30
 num_timesteps = 16
-tnn_thresh = 10
+tnn_thresh = 4 #num_timesteps/2
 max_weight = num_timesteps
-num_winners = 3 #tnn_layer_sz
+num_winners = 2 #tnn_layer_sz
 
 time = num_timesteps
 gpu = False
-
+plot=False
 if gpu and torch.cuda.is_available():
 	torch.cuda.set_device(device_id)
 	# torch.set_default_tensor_type('torch.cuda.FloatTensor')
 else:
 	torch.manual_seed(seed)
 
-plot=True;
 # build network:
 network = Network(dt=1)
 input_layer = Input(n=input_size)
@@ -108,7 +107,9 @@ C1 = Connection(
 
 
 
+
 w = torch.diag(torch.ones(tnn_layer_1.n))
+
 TNN_to_buf = Connection(
 	source=tnn_layer_1,
 	target=buffer_layer_1,
@@ -154,6 +155,7 @@ dataset = MNIST(
 	),
 )
 
+
 # Create a dataloader to iterate and batch data
 dataloader = torch.utils.data.DataLoader(
 	dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=gpu
@@ -173,36 +175,43 @@ voltage_axes = None
 n_iters = examples
 training_pairs = []
 pbar = tqdm(enumerate(dataloader))
-
 for (i, dataPoint) in pbar:
-    if i > n_iters:
-        break
-    datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
-    label = dataPoint["label"]
-    pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
-    for row in range(28):
-        network.run(inputs={"I": datum[:,:,:,row,:]}, time=time)
-
-    training_pairs.append([spikes["TNN_1"].get("s").view(time, -1).sum(0), label])
-
-    if plot and i%10==0:
-        spike_ims, spike_axes = plot_spikes(
-        {layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
-        axes=spike_axes,
-        ims=spike_ims,
-        )
-        if (i == 0):
-            for axis in spike_axes:
-                axis.set_xticks(range(time))
-                axis.set_xticklabels(range(time))
-        weights_im = plot_weights(
-        C1.w,
-        im=weights_im, wmin=0, wmax=max_weight
-        )
-        plt.pause(1e-12)
+	if i > n_iters:
+		break
+	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)#.to(device_id)
+	label = dataPoint["label"]
+	pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
 
 
-    network.reset_state_variables()
+	for row in range(28):
+		#print('here')
+		network.run(inputs={"I": datum[:,:,:,row,:]}, time=time)
+
+		# plot = False
+		if plot:
+			spike_ims, spike_axes = plot_spikes(
+				{layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
+				axes=spike_axes,
+				ims=spike_ims,
+			)
+			for axis in spike_axes:
+				axis.set_xticks(range(time))
+				axis.set_xticklabels(range(time))
+			for l,a in zip(network.layers, spike_axes):
+				a.set_yticks(range(network.layers[l].n))
+				# a.set_yticklabels(range(network.layers[l].n))
+			#input()
+			plt.pause(1e-12)
+	if plot:
+
+			#get_square_weights(C1.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28),
+		weights_im = plot_weights(
+			C1.w,
+			im=weights_im, wmin=0, wmax=max_weight
+		)
+		plt.pause(1e-12)
+	training_pairs.append([spikes["TNN_1"].get("s").view(time, -1).sum(0), label])
+	network.reset_state_variables()
 
 # Define logistic regression model using PyTorch.
 class NN(nn.Module):
@@ -223,7 +232,6 @@ class NN(nn.Module):
 model = NN(tnn_layer_sz,10)
 criterion = torch.nn.MSELoss(reduction="sum")
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
-
 
 # Training the Model
 print("\n Training the read out")
@@ -246,35 +254,47 @@ for epoch, _ in pbar:
         % (epoch + 1, n_epochs, avg_loss / len(training_pairs))
     )
 
-## testing
+
 n_iters = examples
 test_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
-    if i > n_iters:
-        break
-    datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
-    label = dataPoint["label"]
-    pbar.set_description_str("Testing progress: (%d / %d)" % (i, n_iters))
-    for row in range(28):
-        network.run(inputs={"I": datum[:,:,:,row,:]}, time=time, input_time_dim=1)
-    test_pairs.append([spikes["TNN_1"].get("s").view(time, -1).sum(0), label])
+	if i > n_iters:
+		break
+	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)#.to(device_id)
+	label = dataPoint["label"]
+	pbar.set_description_str("Test progress: (%d / %d)" % (i, n_iters))
 
-    if plot and i%10==0:
-        spike_ims, spike_axes = plot_spikes(
-        {layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
-        axes=spike_axes,
-        ims=spike_ims,
-        )
-        if (i == 0):
-            for axis in spike_axes:
-                axis.set_xticks(range(time))
-                axis.set_xticklabels(range(time))
-        weights_im = plot_weights(C1.w,
-        im=weights_im, wmin=0, wmax=max_weight
-        )
-        plt.pause(1e-12)
-    network.reset_state_variables()
+
+	for row in range(28):
+		#print('here')
+		network.run(inputs={"I": datum[:,:,:,row,:]}, time=time)
+
+		# plot = False
+		if plot:
+			spike_ims, spike_axes = plot_spikes(
+				{layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
+				axes=spike_axes,
+				ims=spike_ims,
+			)
+			for axis in spike_axes:
+				axis.set_xticks(range(time))
+				axis.set_xticklabels(range(time))
+			for l,a in zip(network.layers, spike_axes):
+				a.set_yticks(range(network.layers[l].n))
+				# a.set_yticklabels(range(network.layers[l].n))
+			#input()
+			plt.pause(1e-12)
+	if plot:
+
+			#get_square_weights(C1.w, int(math.ceil(math.sqrt(tnn_layer_sz))), 28),
+		weights_im = plot_weights(
+			C1.w,
+			im=weights_im, wmin=0, wmax=max_weight
+		)
+		plt.pause(1e-12)
+	test_pairs.append([spikes["TNN_1"].get("s").view(time, -1).sum(0), label])
+	network.reset_state_variables()
 
 # Test the Model
 correct, total = 0, 0
