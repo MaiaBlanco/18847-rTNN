@@ -40,10 +40,7 @@ parser.add_argument("--intensity", type=float, default=128.0)
 parser.add_argument("--train", dest="train", action="store_true")
 parser.add_argument("--test", dest="train", action="store_false")
 parser.add_argument("--plot", dest="plot", action="store_true")
-parser.add_argument("--gpu", dest="gpu", action="store_true")
 parser.add_argument("--device_id", type=int, default=0)
-parser.set_defaults(plot=False, gpu=False, train=True)
-
 
 args = parser.parse_args()
 
@@ -56,24 +53,18 @@ dt = args.dt
 intensity = args.intensity
 train = args.train
 plot = args.plot
-gpu = args.gpu
 device_id =  0#args.device_id
 
 input_size = 28
-tnn_layer_sz = 30
+tnn_layer_sz = 300
 num_timesteps = 16
-tnn_thresh = 10
+tnn_thresh = 32
 max_weight = num_timesteps
-num_winners = 3 #tnn_layer_sz
+num_winners = 1 #tnn_layer_sz
 
 time = num_timesteps
-gpu = False
 
-if gpu and torch.cuda.is_available():
-	torch.cuda.set_device(device_id)
-	# torch.set_default_tensor_type('torch.cuda.FloatTensor')
-else:
-	torch.manual_seed(seed)
+torch.manual_seed(seed)
 
 plot=True;
 # build network:
@@ -106,8 +97,6 @@ C1 = Connection(
 	maxweight = max_weight
 	)
 
-
-
 w = torch.diag(torch.ones(tnn_layer_1.n))
 TNN_to_buf = Connection(
 	source=tnn_layer_1,
@@ -119,17 +108,16 @@ TNN_to_buf = Connection(
 buf_to_TNN = Connection(
 	source=buffer_layer_1,
 	target=tnn_layer_1,
-	w = 0 * torch.rand(tnn_layer_1.n, tnn_layer_1.n),
-	update_rule=TNN_STDP,
+	w = max_weight * torch.rand(tnn_layer_1.n, tnn_layer_1.n),
+	update_rule=None, #TNN_STDP,
 	ucapture = 	10/128,
 	uminus =	10/128,
-	usearch = 	2/128,
+	usearch = 	8/128,
 	ubackoff = 	96/128,
-	umin = 		4/128,
+	umin = 		16/128,
 	timesteps = num_timesteps,
 	maxweight = max_weight
 	)
-
 
 network.add_layer(input_layer, name="I")
 network.add_layer(tnn_layer_1, name="TNN_1")
@@ -156,7 +144,7 @@ dataset = MNIST(
 
 # Create a dataloader to iterate and batch data
 dataloader = torch.utils.data.DataLoader(
-	dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=gpu
+	dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=False
 )
 
 
@@ -171,38 +159,77 @@ voltage_axes = None
 
 
 n_iters = examples
-training_pairs = []
 pbar = tqdm(enumerate(dataloader))
-
 for (i, dataPoint) in pbar:
     if i > n_iters:
         break
     datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
     label = dataPoint["label"]
-    pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
+    pbar.set_description_str("Pre-Train progress: (%d / %d)" % (i, n_iters))
     for row in range(28):
         network.run(inputs={"I": datum[:,:,:,row,:]}, time=time)
 
-    training_pairs.append([spikes["TNN_1"].get("s").view(time, -1).sum(0), label])
+    network.reset_state_variables()
 
-    if plot and i%10==0:
-        spike_ims, spike_axes = plot_spikes(
-        {layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
-        axes=spike_axes,
-        ims=spike_ims,
-        )
-        if (i == 0):
-            for axis in spike_axes:
-                axis.set_xticks(range(time))
-                axis.set_xticklabels(range(time))
+if plot:
+    n_iters += 10
+    for (i, dataPoint) in pbar:
+        if i > n_iters:
+            break
+        datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+        label = dataPoint["label"]
+        pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
+        for row in range(28):
+            inpt_axes, inpt_ims = plot_input(
+                dataPoint["image"].view(28, 28),
+                datum.view(time, 28, 28).sum(0)[row,:].view(1,28)*1024,
+                #datum[:,:,:,row,:].sum(0).view(1,28),
+                label=label,
+                axes=inpt_axes,
+                ims=inpt_ims,
+            )
+            network.run(inputs={"I": datum[:,:,:,row,:]}, time=time)
+            spike_ims, spike_axes = plot_spikes(
+                {layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
+                axes=spike_axes,
+                ims=spike_ims,
+                )
+            plt.pause(1e-1)
+        for axis in spike_axes:
+            axis.set_xticks(range(time))
+            axis.set_xticklabels(range(time))
+
+        for l,a in zip(network.layers, spike_axes):
+            a.set_yticks(range(network.layers[l].n))
+
         weights_im = plot_weights(
-        C1.w,
-        im=weights_im, wmin=0, wmax=max_weight
-        )
+            C1.w,
+            im=weights_im, wmin=0, wmax=max_weight
+            )
+        weights_im2 = plot_weights(
+            buf_to_TNN.w,
+            im=weights_im2, wmin=0, wmax=max_weight
+            )
         plt.pause(1e-12)
 
+        network.reset_state_variables()
 
+training_pairs = []
+n_iters = examples
+pbar = tqdm(enumerate(dataloader))
+for (i, dataPoint) in pbar:
+    if i > n_iters:
+        break
+    datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+    label = dataPoint["label"]
+    pbar.set_description_str("Generate Readout Training Pairs progress: (%d / %d)" % (i, n_iters))
+    for row in range(28):
+        network.run(inputs={"I": datum[:,:,:,row,:]}, time=time)
+    training_pairs.append([spikes["TNN_1"].get("s").view(time, -1).sum(0), label])
     network.reset_state_variables()
+
+
+
 
 # Define logistic regression model using PyTorch.
 class NN(nn.Module):
@@ -259,21 +286,6 @@ for (i, dataPoint) in pbar:
     for row in range(28):
         network.run(inputs={"I": datum[:,:,:,row,:]}, time=time, input_time_dim=1)
     test_pairs.append([spikes["TNN_1"].get("s").view(time, -1).sum(0), label])
-
-    if plot and i%10==0:
-        spike_ims, spike_axes = plot_spikes(
-        {layer: spikes[layer].get("s").view(time, -1) for layer in spikes},
-        axes=spike_axes,
-        ims=spike_ims,
-        )
-        if (i == 0):
-            for axis in spike_axes:
-                axis.set_xticks(range(time))
-                axis.set_xticklabels(range(time))
-        weights_im = plot_weights(C1.w,
-        im=weights_im, wmin=0, wmax=max_weight
-        )
-        plt.pause(1e-12)
     network.reset_state_variables()
 
 # Test the Model
