@@ -29,11 +29,11 @@ from bindsnet.utils import get_square_weights
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
-parser.add_argument("--n_neurons", type=int, default=500)
-parser.add_argument("--n_epochs", type=int, default=100)
+parser.add_argument("--n_neurons", type=int, default=500)    # 500
+parser.add_argument("--n_epochs", type=int, default=200)    #100
 parser.add_argument("--examples", type=int, default=500)
 parser.add_argument("--n_workers", type=int, default=-1)
-parser.add_argument("--time", type=int, default=250)
+parser.add_argument("--time", type=int, default=28)
 parser.add_argument("--dt", type=int, default=1.0)
 parser.add_argument("--intensity", type=float, default=64)
 parser.add_argument("--progress_interval", type=int, default=10)
@@ -71,7 +71,6 @@ if gpu and torch.cuda.is_available():
 else:
     torch.manual_seed(seed)
 
-
 network = Network(dt=dt)
 inpt = Input(28, shape=(1, 1, 28))
 network.add_layer(inpt, name="I")
@@ -99,8 +98,6 @@ if gpu:
 # Load MNIST data.
 dataset = MNIST(
     #RankOrderEncoder(time=time, dt=dt),
-    RankOrderEncoder(time=time, dt=dt),
-    None,
     root=os.path.join("..", "..", "data", "MNIST"),
     download=True,
     transform=transforms.Compose(
@@ -133,12 +130,12 @@ pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
     if i > n_iters:
         break
-    datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+    datum = dataPoint["encoded_image"].view(time, 1, 1, 28)
     label = dataPoint["label"]
     pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
-    for row in range(28):
-        network.run(inputs={"I": datum[:,:,:,row,:]}, time=time, input_time_dim=1)
+    network.run(inputs={"I": datum}, time=time, input_time_dim=1)
     training_pairs.append([spikes["O"].get("s").sum(0), label])
+    print(spikes["O"].get("s"))
     network.reset_state_variables()
 
 # Define logistic regression model using PyTorch.
@@ -188,11 +185,10 @@ pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
     if i > n_iters:
         break
-    datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+    datum = dataPoint["encoded_image"].view(time, 1, 1, 28)
     label = dataPoint["label"]
     pbar.set_description_str("Test progress: (%d / %d)" % (i, n_iters))
-    for pix in range(28):
-        network.run(inputs={"I": datum[:,:,:,pix,:]}, time=time, input_time_dim=1)
+    network.run(inputs={"I": datum}, time=time, input_time_dim=1)
     test_pairs.append([spikes["O"].get("s").sum(0), label])
     network.reset_state_variables()
 

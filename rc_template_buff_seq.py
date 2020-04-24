@@ -31,9 +31,9 @@ print()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
-parser.add_argument("--n_epochs", type=int, default=50)
+parser.add_argument("--n_epochs", type=int, default=500)
 parser.add_argument("--n_test", type=int, default=10000)
-parser.add_argument("--examples", type=int, default=10000)
+parser.add_argument("--examples", type=int, default=1000)
 parser.add_argument("--time", type=int, default=50)
 parser.add_argument("--dt", type=int, default=1.0)
 parser.add_argument("--intensity", type=float, default=128.0)
@@ -66,7 +66,6 @@ time = num_timesteps
 
 torch.manual_seed(seed)
 
-plot=True;
 # build network:
 network = Network(dt=1)
 input_layer = Input(n=input_size)
@@ -98,6 +97,7 @@ C1 = Connection(
 	)
 
 w = torch.diag(torch.ones(tnn_layer_1.n))
+
 TNN_to_buf = Connection(
 	source=tnn_layer_1,
 	target=buffer_layer_1,
@@ -141,6 +141,7 @@ dataset = MNIST(
 		[transforms.ToTensor(), transforms.Lambda(lambda x: x * intensity)]
 	),
 )
+
 
 # Create a dataloader to iterate and batch data
 dataloader = torch.utils.data.DataLoader(
@@ -229,8 +230,6 @@ for (i, dataPoint) in pbar:
     network.reset_state_variables()
 
 
-
-
 # Define logistic regression model using PyTorch.
 class NN(nn.Module):
     def __init__(self, input_size, num_classes):
@@ -250,7 +249,6 @@ class NN(nn.Module):
 model = NN(tnn_layer_sz,10)
 criterion = torch.nn.MSELoss(reduction="sum")
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
-
 
 # Training the Model
 print("\n Training the read out")
@@ -273,7 +271,7 @@ for epoch, _ in pbar:
         % (epoch + 1, n_epochs, avg_loss / len(training_pairs))
     )
 
-## testing
+
 n_iters = examples
 test_pairs = []
 pbar = tqdm(enumerate(dataloader))
