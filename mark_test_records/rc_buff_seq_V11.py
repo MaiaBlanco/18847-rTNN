@@ -1,5 +1,3 @@
-import sys,os
-sys.path.insert(1, os.path.join(sys.path[0], '..'))
 
 import torch.nn as nn
 import math
@@ -59,16 +57,16 @@ plot = args.plot
 device_id =  0#args.device_id
 
 input_size = 28
-input_slice = 20
-tnn_layer_sz = 20
-rtnn_layer_sz = 50
+input_slice = 28
+tnn_layer_sz = 50
+rtnn_layer_sz = 100
 num_timesteps = 16
-tnn_thresh = 64
-rtnn_thresh = 8
+tnn_thresh = 32
+rtnn_thresh = 32
 max_weight = 16
-max_weight_rtnn = 16
-num_winners_tnn = 1 
-num_winners_rtnn = rtnn_layer_sz//10
+max_weight_rtnn = 32
+num_winners_tnn = 2 
+num_winners_rtnn = 10
 
 time = num_timesteps
 
@@ -77,20 +75,7 @@ torch.manual_seed(seed)
 # build network:
 network = Network(dt=1)
 input_layer_a = Input(n=input_slice)
-input_layer_b = Input(n=input_slice)
 
-tnn_layer_1a = TemporalNeurons( 
-	n=tnn_layer_sz, 
-	timesteps=num_timesteps, 
-	threshold=tnn_thresh, 
-	num_winners=num_winners_tnn
-	)
-tnn_layer_1b = TemporalNeurons( 
-    n=tnn_layer_sz, 
-    timesteps=num_timesteps, 
-    threshold=tnn_thresh, 
-    num_winners=num_winners_tnn
-    )
 rtnn_layer_1 = TemporalNeurons( 
     n=rtnn_layer_sz, 
     timesteps=num_timesteps, 
@@ -99,82 +84,57 @@ rtnn_layer_1 = TemporalNeurons(
     )
 
 buffer_layer_1 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
-buffer_layer_2 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
 
 stdp_tnn_params = {
-    "ucapture":  10/128,
-    "uminus":    10/128,
+    "ucapture":  20/128,
+    "uminus":    20/128,
     "usearch":   2/128,
     "ubackoff":  96/128,
     "umin":      4/128,
     "maxweight": max_weight
 }
 stdp_rtnn_params = {
-    "ucapture":  15/128,
-    "uminus":    15/128,
+    "ucapture":  30/128,
+    "uminus":    30/128,
     "usearch":   10/128,
     "ubackoff":  96/128,
-    "umin":      1/128,
+    "umin":      16/128,
     "maxweight": max_weight_rtnn
 }
 
 # Feed-forward connections
-w_rand_l1 = 0.1 * max_weight * torch.rand(input_layer_a.n, tnn_layer_1a.n)
-w_rand_l2 = 0.1 * max_weight * torch.rand(tnn_layer_1a.n, rtnn_layer_1.n)
-FF1a = Connection(source=input_layer_a, target=tnn_layer_1a,
+w_rand_l1 = 0.1 * max_weight * torch.rand(input_layer_a.n, rtnn_layer_1.n)
+FF1a = Connection(source=input_layer_a, target=rtnn_layer_1,
 	w = w_rand_l1, timesteps = num_timesteps,
     update_rule=TNN_STDP, **stdp_tnn_params)
-FF1b = Connection(source=input_layer_b, target=tnn_layer_1b,
-    w = w_rand_l1, timesteps = num_timesteps,
-    update_rule=TNN_STDP, **stdp_tnn_params )
-FF2a = Connection(source=tnn_layer_1a, target=rtnn_layer_1,
-    w = w_rand_l2, timesteps = num_timesteps,
-    update_rule=TNN_STDP, **stdp_rtnn_params )
-FF2b = Connection(source=tnn_layer_1b, target=rtnn_layer_1,
-    w = w_rand_l2, timesteps = num_timesteps,
-    update_rule=TNN_STDP, **stdp_rtnn_params )
 
 # Recurrent connections
 w_eye_rtnn = torch.diag(torch.ones(rtnn_layer_1.n))
 rTNN_to_buf1 = Connection(source=rtnn_layer_1, target=buffer_layer_1,
 	w = w_eye_rtnn, update_rule=None)
-buf1_to_buf2 = Connection(source=buffer_layer_1, target=buffer_layer_2,
-    w = w_eye_rtnn, update_rule=None)
 
+# Force recurrent connectivity to be sparse, but strong.
+w_recur = max_weight * torch.rand(rtnn_layer_1.n, rtnn_layer_1.n)
+w_recur[torch.rand(rtnn_layer_1.n, rtnn_layer_1.n) < 0.90] = 0
 buf1_to_rTNN = Connection(
 	source=buffer_layer_1,
 	target=rtnn_layer_1,
-	w = 0.5 * max_weight * torch.rand(rtnn_layer_1.n, rtnn_layer_1.n),
+	w = w_recur,
     timesteps = num_timesteps,
-    update_rule=TNN_STDP, **stdp_rtnn_params )
+    update_rule=None )
 
-buf2_to_rTNN = Connection(
-    source=buffer_layer_2,
-    target=rtnn_layer_1,
-    w = 0.5 * max_weight * torch.rand(rtnn_layer_1.n, rtnn_layer_1.n),
-    timesteps = num_timesteps,
-    update_rule=TNN_STDP, **stdp_rtnn_params )
 
 # Add all nodes to network:
 network.add_layer(input_layer_a, name="I_a")
-network.add_layer(input_layer_b, name="I_b")
-network.add_layer(tnn_layer_1a, name="TNN_1a")
-network.add_layer(tnn_layer_1b, name="TNN_1b")
 network.add_layer(buffer_layer_1, name="BUF_1")
-network.add_layer(buffer_layer_2, name="BUF_2")
 network.add_layer(rtnn_layer_1, name="rTNN_1")
 
 # Add connections to network:
 # (feedforward)
-network.add_connection(FF1a, source="I_a", target="TNN_1a")
-network.add_connection(FF1b, source="I_b", target="TNN_1b")
-network.add_connection(FF2a, source="TNN_1a", target="rTNN_1")
-network.add_connection(FF2b, source="TNN_1b", target="rTNN_1")
+network.add_connection(FF1a, source="I_a", target="rTNN_1")
 # (Recurrences)
 network.add_connection(rTNN_to_buf1, source="rTNN_1", target="BUF_1")
-network.add_connection(buf1_to_buf2, source="BUF_1", target="BUF_2")
 network.add_connection(buf1_to_rTNN, source="BUF_1", target="rTNN_1")
-network.add_connection(buf2_to_rTNN, source="BUF_2", target="rTNN_1")
 
 
 # End of network creation
@@ -210,15 +170,21 @@ spike_axes = None
 spike_ims = None
 weights_im = None
 weights_im2 = None
+weights_im3 = None
+weights_im4 = None
 
+enum_dataloader = enumerate(dataloader)
+i_offset = 0
 # Start training synapses via STDP:
-seqMnistSimSplit(examples, dataloader, network, time, spikes,
-    train=True, plot=False, print_str="Pre-Training", slice_size=input_slice)
+seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
+    train=True, plot=False, print_str="Pre-Training", 
+    I_NAME="I_a", TNN_NAME="rTNN_1")
+i_offset += examples
 
 if plot:
     input("Press enter to continue to plotting...")
     pbar = tqdm(enumerate(dataloader))
-    n_iters = 1
+    n_iters = 10
     for (i, dataPoint) in pbar:
         if i > n_iters:
             break
@@ -236,7 +202,6 @@ if plot:
             )
             input_slices = {
                 "I_a":datum[:,:,:,row,:input_slice],
-                "I_b":datum[:,:,:,row,28-input_slice:]
             }
             network.run(inputs=input_slices, time=time, input_time_dim=1)
             spike_ims, spike_axes = plot_spikes(
@@ -253,14 +218,15 @@ if plot:
             a.set_yticks(range(network.layers[l].n))
 
         weights_im = plot_weights(
-            FF2a.w,
+            FF1a.w,
             im=weights_im, wmin=0, wmax=max_weight
             )
-        weights_im2 = plot_weights(
+        weights_im3 = plot_weights(
             buf1_to_rTNN.w,
-            im=weights_im2, wmin=0, wmax=max_weight
+            im=weights_im3, wmin=0, wmax=max_weight_rtnn
             )
         plt.pause(1e-12)
+        input()
 
         network.reset_state_variables()
 
@@ -268,8 +234,10 @@ if plot:
 network.train(mode=False)
 
 # Generate training pairs for log reg readout:
-training_pairs = seqMnistSimSplit(examples, dataloader, network, time, spikes,
-    train=True, plot=False, print_str="Readout Training", slice_size=input_slice)
+training_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
+    train=True, plot=False, print_str="Readout Training", 
+    I_NAME="I_a", TNN_NAME="rTNN_1")
+i_offset += examples
 
 
 # Create and train logistic regression model on reservoir outputs.
@@ -279,8 +247,10 @@ optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
 train_readout(n_epochs, training_pairs, model, optimizer, criterion)
 
 # Generate testing pairs for log reg test:
-test_pairs = seqMnistSimSplit(examples, dataloader, network, time, spikes,
-    train=False, plot=False, print_str="Readout Testing", slice_size=input_slice)
+test_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
+    train=False, plot=False, print_str="Readout Testing", 
+    I_NAME="I_a", TNN_NAME="rTNN_1")
+i_offset += examples
 
 # Test the Model
 correct, total = 0, 0
