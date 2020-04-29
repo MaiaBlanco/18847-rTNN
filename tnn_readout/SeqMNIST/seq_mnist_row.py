@@ -128,7 +128,7 @@ n_iters = examples
 training_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
-    if i > n_iters:
+    if i >= n_iters:
         break
     datum = dataPoint["encoded_image"].view(time, 1, 1, 28)
     label = dataPoint["label"]
@@ -183,7 +183,9 @@ n_iters = examples
 test_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
-    if i > n_iters:
+    if i <= examples:
+        continue
+    if i >= n_iters + examples:
         break
     datum = dataPoint["encoded_image"].view(time, 1, 1, 28)
     label = dataPoint["label"]

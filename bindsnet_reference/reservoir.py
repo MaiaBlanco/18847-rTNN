@@ -92,9 +92,6 @@ voltages = {"O": Monitor(network.layers["O"], ["v"], time=time)}
 network.add_monitor(voltages["O"], name="O_voltages")
 
 # Directs network to GPU
-
-
-
 # Get MNIST training images and labels.
 # Load MNIST data.
 dataset = MNIST(
@@ -126,10 +123,7 @@ n_iters = examples
 training_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
-    print(i)
-exit()
-for (i, dataPoint) in pbar:
-    if i > n_iters:
+    if i >= n_iters:
         break
     datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
     label = dataPoint["label"]
@@ -170,14 +164,10 @@ for (i, dataPoint) in pbar:
 class NN(nn.Module):
     def __init__(self, input_size, num_classes):
         super(NN, self).__init__()
-        # h = int(input_size/2)
         self.linear_1 = nn.Linear(input_size, num_classes)
-        # self.linear_1 = nn.Linear(input_size, h)
-        # self.linear_2 = nn.Linear(h, num_classes)
 
     def forward(self, x):
         out = torch.sigmoid(self.linear_1(x.float().view(-1)))
-        # out = torch.sigmoid(self.linear_2(out))
         return out
 
 # Create and train logistic regression model on reservoir outputs.
@@ -210,7 +200,9 @@ n_iters = examples
 test_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
-    if i > n_iters:
+    if i <= examples:
+        continue
+    if i >= n_iters + examples:
         break
     datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
     label = dataPoint["label"]
