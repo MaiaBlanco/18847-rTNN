@@ -69,11 +69,11 @@ else:
 
 # Parameters for TNN
 input_size = 28*28
-tnn_layer_sz = 16
+tnn_layer_sz = 80
 num_timesteps = 8
-tnn_thresh = 512
+tnn_thresh = 250
 max_weight = num_timesteps
-num_winners = 2
+num_winners = 3
 time = num_timesteps
 
 # TNN Network Build
@@ -138,8 +138,9 @@ n_iters = examples
 training_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
-	if i > n_iters:
+	if i >= n_iters:
 		break
+	print(i)
 	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)#.to(device_id)
 	label = dataPoint["label"]
 	pbar.set_description_str("Pre-train progress: (%d / %d)" % (i, n_iters))
@@ -220,8 +221,11 @@ n_iters = examples
 test_pairs = []
 pbar = tqdm(enumerate(dataloader))
 for (i, dataPoint) in pbar:
-	if i > n_iters:
+	if i <= examples:
+		continue
+	if i >= n_iters + examples:
 		break
+	print(i)
 	datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
 	label = dataPoint["label"]
 	pbar.set_description_str("Test progress: (%d / %d)" % (i, n_iters))
