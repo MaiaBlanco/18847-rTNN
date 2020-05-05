@@ -28,7 +28,7 @@ from bindsnet.analysis.plotting import (
 from TNN import *
 
 def seqMnistSimVanilla(examples, enum_dataloader, curr_i, network, time, spikes,
-	train=True, plot=False, print_str=None, I_NAME="I", TNN_NAME="TNN_1"):
+	train=True, plot=False, print_str=None, I_NAME="I", TNN_NAME="TNN_1", input_slice=28):
 	if not train and print_str is None:
 		print_str = "Testing"
 	n_iters = examples
@@ -38,10 +38,10 @@ def seqMnistSimVanilla(examples, enum_dataloader, curr_i, network, time, spikes,
 		if i-curr_i > n_iters:
 			break
 
-		datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+		datum = dataPoint["encoded_image"].view(time, 1, 1, input_slice, input_slice)
 		label = dataPoint["label"]
 		pbar.set_description_str("%s progress: (%d / %d)" % (print_str, i-curr_i, n_iters))
-		for row in range(28):
+		for row in range(input_slice):
 			network.run(inputs={I_NAME: datum[:,:,:,row,:]}, time=time, input_time_dim=1)
 		test_pairs.append([spikes[TNN_NAME].get("s").view(time, -1).sum(0), label])
 		network.reset_state_variables()
@@ -50,7 +50,7 @@ def seqMnistSimVanilla(examples, enum_dataloader, curr_i, network, time, spikes,
 
 # Splits input row between 2 input layers:
 def seqMnistSimSplit(examples, enum_dataloader, curr_i, network, time, spikes,
-	train=True, plot=False, print_str=None, slice_size=16):
+	train=True, plot=False, print_str=None, slice_size=16, input_slice=28):
 	if not train and print_str is None:
 		print_str = "Testing"
 	n_iters = examples
@@ -60,13 +60,13 @@ def seqMnistSimSplit(examples, enum_dataloader, curr_i, network, time, spikes,
 		if i-curr_i > n_iters:
 			break
 
-		datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+		datum = dataPoint["encoded_image"].view(time, 1, 1, input_slice, input_slice)
 		label = dataPoint["label"]
 		pbar.set_description_str("%s progress: (%d / %d)" % (print_str, i-curr_i, n_iters))
-		for row in range(28):
+		for row in range(input_slice):
 			input_slices = {
 				"I_a":datum[:,:,:,row,:slice_size],
-				"I_b":datum[:,:,:,row,28-slice_size:]
+				"I_b":datum[:,:,:,row,input_slice-slice_size:]
 			}
 			network.run(inputs=input_slices, time=time, input_time_dim=1)
 		test_pairs.append([spikes["rTNN_1"].get("s").view(time, -1).sum(0), label])
@@ -76,7 +76,7 @@ def seqMnistSimSplit(examples, enum_dataloader, curr_i, network, time, spikes,
 
 # Concatenate rsult at end of each wave to training examples.
 def seqMnistSimConcat(examples, enum_dataloader, curr_i, network, time, spikes,
-	train=True, plot=False, print_str=None, I_NAME="I", TNN_NAME="TNN_1"):
+	train=True, plot=False, print_str=None, I_NAME="I", TNN_NAME="TNN_1", input_slice=28):
 	if not train and print_str is None:
 		print_str = "Testing"
 	n_iters = examples
@@ -86,10 +86,10 @@ def seqMnistSimConcat(examples, enum_dataloader, curr_i, network, time, spikes,
 		if i-curr_i > n_iters:
 			break
 		example_data = []
-		datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+		datum = dataPoint["encoded_image"].view(time, 1, 1, input_slice, input_slice)
 		label = dataPoint["label"]
 		pbar.set_description_str("%s progress: (%d / %d)" % (print_str, i-curr_i, n_iters))
-		for row in range(28):
+		for row in range(input_slice):
 			network.run(inputs={I_NAME: datum[:,:,:,row,:]}, time=time, input_time_dim=1)
 			example_data.append(spikes[TNN_NAME].get("s").view(time, -1).sum(0))
 		input_vec = torch.cat(example_data, 0).squeeze()

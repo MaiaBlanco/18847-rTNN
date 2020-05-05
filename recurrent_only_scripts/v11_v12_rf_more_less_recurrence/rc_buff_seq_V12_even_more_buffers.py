@@ -1,4 +1,5 @@
-
+import sys,os
+sys.path.insert(1, os.path.join(sys.path[0], '../..'))
 import torch.nn as nn
 import math
 import torch
@@ -64,8 +65,7 @@ num_timesteps = 16
 tnn_thresh = 32
 rtnn_thresh = 32
 max_weight = 16
-max_weight_rtnn = 32
-num_winners_tnn = 2 
+max_weight_rtnn = 8
 num_winners_rtnn = 10
 
 time = num_timesteps
@@ -84,6 +84,9 @@ rtnn_layer_1 = TemporalNeurons(
     )
 
 buffer_layer_1 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
+buffer_layer_2 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
+buffer_layer_3 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
+buffer_layer_4 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
 
 stdp_tnn_params = {
     "ucapture":  20/128,
@@ -112,12 +115,26 @@ FF1a = Connection(source=input_layer_a, target=rtnn_layer_1,
 w_eye_rtnn = torch.diag(torch.ones(rtnn_layer_1.n))
 rTNN_to_buf1 = Connection(source=rtnn_layer_1, target=buffer_layer_1,
     w = w_eye_rtnn, update_rule=None)
+buf1_to_buf2 = Connection(source=buffer_layer_1, target=buffer_layer_2,
+    w = w_eye_rtnn, update_rule=None)
+buf2_to_buf3 = Connection(source=buffer_layer_2, target=buffer_layer_3,
+    w = w_eye_rtnn, update_rule=None)
+buf3_to_buf4 = Connection(source=buffer_layer_3, target=buffer_layer_4,
+    w = w_eye_rtnn, update_rule=None)
 
 # Force recurrent connectivity to be sparse, but strong.
-w_recur = max_weight * torch.rand(rtnn_layer_1.n, rtnn_layer_1.n)
+w_recur = max_weight_rtnn * torch.rand(rtnn_layer_1.n, rtnn_layer_1.n)
 w_recur[torch.rand(rtnn_layer_1.n, rtnn_layer_1.n) < 0.90] = 0
-buf1_to_rTNN = Connection(
-    source=buffer_layer_1,
+buf2_to_rTNN = Connection(
+    source=buffer_layer_2,
+    target=rtnn_layer_1,
+    w = w_recur,
+    timesteps = num_timesteps,
+    update_rule=TNN_STDP, **stdp_rtnn_params )
+w_recur = max_weight_rtnn * torch.rand(rtnn_layer_1.n, rtnn_layer_1.n)
+w_recur[torch.rand(rtnn_layer_1.n, rtnn_layer_1.n) < 0.90] = 0
+buf4_to_rTNN = Connection(
+    source=buffer_layer_4,
     target=rtnn_layer_1,
     w = w_recur,
     timesteps = num_timesteps,
@@ -126,15 +143,22 @@ buf1_to_rTNN = Connection(
 
 # Add all nodes to network:
 network.add_layer(input_layer_a, name="I_a")
-network.add_layer(buffer_layer_1, name="BUF_1")
 network.add_layer(rtnn_layer_1, name="rTNN_1")
+network.add_layer(buffer_layer_1, name="BUF_1")
+network.add_layer(buffer_layer_2, name="BUF_2")
+network.add_layer(buffer_layer_3, name="BUF_3")
+network.add_layer(buffer_layer_4, name="BUF_4")
 
 # Add connections to network:
 # (feedforward)
 network.add_connection(FF1a, source="I_a", target="rTNN_1")
 # (Recurrences)
 network.add_connection(rTNN_to_buf1, source="rTNN_1", target="BUF_1")
-network.add_connection(buf1_to_rTNN, source="BUF_1", target="rTNN_1")
+network.add_connection(buf1_to_buf2, source="BUF_1", target="BUF_2")
+network.add_connection(buf2_to_buf3, source="BUF_2", target="BUF_3")
+network.add_connection(buf3_to_buf4, source="BUF_3", target="BUF_4")
+network.add_connection(buf2_to_rTNN, source="BUF_2", target="rTNN_1")
+network.add_connection(buf4_to_rTNN, source="BUF_4", target="rTNN_1")
 
 
 # End of network creation
@@ -176,7 +200,7 @@ weights_im4 = None
 enum_dataloader = enumerate(dataloader)
 i_offset = 0
 # Start training synapses via STDP:
-seqMnistSimConcat(examples, enum_dataloader, i_offset, network, time, spikes,
+seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
     train=True, plot=False, print_str="Pre-Training", 
     I_NAME="I_a", TNN_NAME="rTNN_1")
 i_offset += examples
@@ -222,8 +246,12 @@ if plot:
             im=weights_im, wmin=0, wmax=max_weight
             )
         weights_im3 = plot_weights(
-            buf1_to_rTNN.w,
+            buf2_to_rTNN.w,
             im=weights_im3, wmin=0, wmax=max_weight_rtnn
+            )
+        weights_im2 = plot_weights(
+            buf4_to_rTNN.w,
+            im=weights_im2, wmin=0, wmax=max_weight_rtnn
             )
         plt.pause(1e-12)
         input()
@@ -234,20 +262,20 @@ if plot:
 network.train(mode=False)
 
 # Generate training pairs for log reg readout:
-training_pairs = seqMnistSimConcat(examples, enum_dataloader, i_offset, network, time, spikes,
+training_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
     train=True, plot=False, print_str="Readout Training", 
     I_NAME="I_a", TNN_NAME="rTNN_1")
 i_offset += examples
 
 
 # Create and train logistic regression model on reservoir outputs.
-model = LogReg(rtnn_layer_sz*28, 10)
+model = LogReg(rtnn_layer_sz, 10)
 criterion = torch.nn.MSELoss(reduction="sum")
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
 train_readout(n_epochs, training_pairs, model, optimizer, criterion)
 
 # Generate testing pairs for log reg test:
-test_pairs = seqMnistSimConcat(examples, enum_dataloader, i_offset, network, time, spikes,
+test_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
     train=False, plot=False, print_str="Readout Testing", 
     I_NAME="I_a", TNN_NAME="rTNN_1")
 i_offset += examples

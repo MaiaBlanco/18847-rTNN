@@ -1,4 +1,5 @@
-
+import sys,os
+sys.path.insert(1, os.path.join(sys.path[0], '../..'))
 import torch.nn as nn
 import math
 import torch
@@ -57,7 +58,7 @@ plot = args.plot
 device_id =  0#args.device_id
 
 input_size = 28
-input_slice = 28
+input_slice = 8
 tnn_layer_sz = 50
 rtnn_layer_sz = 100
 num_timesteps = 16
@@ -76,12 +77,6 @@ torch.manual_seed(seed)
 network = Network(dt=1)
 input_layer_a = Input(n=input_slice)
 
-tnn_layer_1a = TemporalNeurons( 
-	n=tnn_layer_sz, 
-	timesteps=num_timesteps, 
-	threshold=tnn_thresh, 
-	num_winners=num_winners_tnn
-	)
 rtnn_layer_1 = TemporalNeurons( 
     n=rtnn_layer_sz, 
     timesteps=num_timesteps, 
@@ -90,7 +85,6 @@ rtnn_layer_1 = TemporalNeurons(
     )
 
 buffer_layer_1 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
-buffer_layer_2 = TemporalBufferNeurons(n=rtnn_layer_sz, timesteps=num_timesteps)
 
 stdp_tnn_params = {
     "ucapture":  20/128,
@@ -101,23 +95,19 @@ stdp_tnn_params = {
     "maxweight": max_weight
 }
 stdp_rtnn_params = {
-    "ucapture":  20/128,
-    "uminus":    20/128,
-    "usearch":   30/128,
+    "ucapture":  30/128,
+    "uminus":    30/128,
+    "usearch":   10/128,
     "ubackoff":  96/128,
     "umin":      16/128,
     "maxweight": max_weight_rtnn
 }
 
 # Feed-forward connections
-w_rand_l1 = 0.1 * max_weight * torch.rand(input_layer_a.n, tnn_layer_1a.n)
-w_rand_l2 = 0.1 * max_weight * torch.rand(tnn_layer_1a.n, rtnn_layer_1.n)
-FF1a = Connection(source=input_layer_a, target=tnn_layer_1a,
+w_rand_l1 = 0.1 * max_weight * torch.rand(input_layer_a.n, rtnn_layer_1.n)
+FF1a = Connection(source=input_layer_a, target=rtnn_layer_1,
 	w = w_rand_l1, timesteps = num_timesteps,
     update_rule=TNN_STDP, **stdp_tnn_params)
-FF2a = Connection(source=tnn_layer_1a, target=rtnn_layer_1,
-    w = w_rand_l2, timesteps = num_timesteps,
-    update_rule=TNN_STDP, **stdp_rtnn_params )
 
 # Recurrent connections
 w_eye_rtnn = torch.diag(torch.ones(rtnn_layer_1.n))
@@ -137,14 +127,12 @@ buf1_to_rTNN = Connection(
 
 # Add all nodes to network:
 network.add_layer(input_layer_a, name="I_a")
-network.add_layer(tnn_layer_1a, name="TNN_1a")
 network.add_layer(buffer_layer_1, name="BUF_1")
 network.add_layer(rtnn_layer_1, name="rTNN_1")
 
 # Add connections to network:
 # (feedforward)
-network.add_connection(FF1a, source="I_a", target="TNN_1a")
-network.add_connection(FF2a, source="TNN_1a", target="rTNN_1")
+network.add_connection(FF1a, source="I_a", target="rTNN_1")
 # (Recurrences)
 network.add_connection(rTNN_to_buf1, source="rTNN_1", target="BUF_1")
 network.add_connection(buf1_to_rTNN, source="BUF_1", target="rTNN_1")
@@ -166,7 +154,8 @@ dataset = MNIST(
 	root=os.path.join("..", "..", "data", "MNIST"),
 	download=True,
 	transform=transforms.Compose(
-		[transforms.ToTensor(), transforms.Lambda(lambda x: x * intensity)]
+        [transforms.CenterCrop(input_slice), transforms.ToTensor(), 
+        transforms.Lambda(lambda x: x * intensity)]
 	),
 )
 
@@ -186,10 +175,13 @@ weights_im2 = None
 weights_im3 = None
 weights_im4 = None
 
+enum_dataloader = enumerate(dataloader)
+i_offset = 0
 # Start training synapses via STDP:
-seqMnistSimVanilla(examples, dataloader, network, time, spikes,
+seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
     train=True, plot=False, print_str="Pre-Training", 
-    I_NAME="I_a", TNN_NAME="rTNN_1")
+    I_NAME="I_a", TNN_NAME="rTNN_1", input_slice=input_slice)
+i_offset += examples
 
 if plot:
     input("Press enter to continue to plotting...")
@@ -198,20 +190,20 @@ if plot:
     for (i, dataPoint) in pbar:
         if i > n_iters:
             break
-        datum = dataPoint["encoded_image"].view(time, 1, 1, 28, 28)
+        datum = dataPoint["encoded_image"].view(time, 1, 1, input_slice, input_slice)
         label = dataPoint["label"]
         pbar.set_description_str("Train progress: (%d / %d)" % (i, n_iters))
-        for row in range(28):
+        for row in range(input_slice):
             inpt_axes, inpt_ims = plot_input(
-                dataPoint["image"].view(28, 28),
-                datum.view(time, 28, 28).sum(0)[row,:].view(1,28)*128,
+                dataPoint["image"].view(input_slice, input_slice),
+                datum.view(time, input_slice, input_slice).sum(0)[row,:].view(1,input_slice)*128,
                 #datum[:,:,:,row,:].sum(0).view(1,28),
                 label=label,
                 axes=inpt_axes,
                 ims=inpt_ims,
             )
             input_slices = {
-                "I_a":datum[:,:,:,row,:input_slice],
+                "I_a":datum[:,:,:,row,:],
             }
             network.run(inputs=input_slices, time=time, input_time_dim=1)
             spike_ims, spike_axes = plot_spikes(
@@ -231,10 +223,6 @@ if plot:
             FF1a.w,
             im=weights_im, wmin=0, wmax=max_weight
             )
-        weights_im2 = plot_weights(
-            FF2a.w,
-            im=weights_im2, wmin=0, wmax=max_weight_rtnn
-            )
         weights_im3 = plot_weights(
             buf1_to_rTNN.w,
             im=weights_im3, wmin=0, wmax=max_weight_rtnn
@@ -248,9 +236,10 @@ if plot:
 network.train(mode=False)
 
 # Generate training pairs for log reg readout:
-training_pairs = seqMnistSimVanilla(examples, dataloader, network, time, spikes,
+training_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
     train=True, plot=False, print_str="Readout Training", 
-    I_NAME="I_a", TNN_NAME="rTNN_1")
+    I_NAME="I_a", TNN_NAME="rTNN_1", input_slice=input_slice)
+i_offset += examples
 
 
 # Create and train logistic regression model on reservoir outputs.
@@ -260,9 +249,10 @@ optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
 train_readout(n_epochs, training_pairs, model, optimizer, criterion)
 
 # Generate testing pairs for log reg test:
-test_pairs = seqMnistSimVanilla(examples, dataloader, network, time, spikes,
+test_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
     train=False, plot=False, print_str="Readout Testing", 
-    I_NAME="I_a", TNN_NAME="rTNN_1")
+    I_NAME="I_a", TNN_NAME="rTNN_1", input_slice=input_slice)
+i_offset += examples
 
 # Test the Model
 correct, total = 0, 0

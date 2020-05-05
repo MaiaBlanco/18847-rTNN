@@ -1,4 +1,5 @@
-
+import sys,os
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
 import torch.nn as nn
 import math
 import torch
@@ -176,7 +177,7 @@ weights_im4 = None
 enum_dataloader = enumerate(dataloader)
 i_offset = 0
 # Start training synapses via STDP:
-seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
+seqMnistSimConcat(examples, enum_dataloader, i_offset, network, time, spikes,
     train=True, plot=False, print_str="Pre-Training", 
     I_NAME="I_a", TNN_NAME="rTNN_1")
 i_offset += examples
@@ -234,20 +235,20 @@ if plot:
 network.train(mode=False)
 
 # Generate training pairs for log reg readout:
-training_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
+training_pairs = seqMnistSimConcat(examples, enum_dataloader, i_offset, network, time, spikes,
     train=True, plot=False, print_str="Readout Training", 
     I_NAME="I_a", TNN_NAME="rTNN_1")
 i_offset += examples
 
 
 # Create and train logistic regression model on reservoir outputs.
-model = LogReg(rtnn_layer_sz, 10)
+model = LogReg(rtnn_layer_sz*28, 10)
 criterion = torch.nn.MSELoss(reduction="sum")
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
 train_readout(n_epochs, training_pairs, model, optimizer, criterion)
 
 # Generate testing pairs for log reg test:
-test_pairs = seqMnistSimVanilla(examples, enum_dataloader, i_offset, network, time, spikes,
+test_pairs = seqMnistSimConcat(examples, enum_dataloader, i_offset, network, time, spikes,
     train=False, plot=False, print_str="Readout Testing", 
     I_NAME="I_a", TNN_NAME="rTNN_1")
 i_offset += examples

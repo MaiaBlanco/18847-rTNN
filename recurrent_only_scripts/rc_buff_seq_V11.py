@@ -1,4 +1,5 @@
-
+import sys,os
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
 import torch.nn as nn
 import math
 import torch
@@ -10,19 +11,19 @@ from time import time as t
 from tqdm import tqdm
 
 from bindsnet.datasets import MNIST
-from bindsnet.encoding import RankOrderEncoder, PoissonEncoder
+from bindsnet.encoding import RankOrderEncoder
 from bindsnet.network import Network
 from bindsnet.network.monitors import Monitor
 from bindsnet.network.nodes import Input
 from bindsnet.network.topology import Conv2dConnection, Connection
 from bindsnet.utils import get_square_weights
 from bindsnet.analysis.plotting import (
-    plot_input,
-    plot_spikes,
-    plot_voltages,
-    plot_weights,
-    plot_conv2d_weights,
-    plot_voltages,
+	plot_input,
+	plot_spikes,
+	plot_voltages,
+	plot_weights,
+	plot_conv2d_weights,
+	plot_voltages,
 )
 
 from TNN import *
@@ -105,23 +106,23 @@ stdp_rtnn_params = {
 # Feed-forward connections
 w_rand_l1 = 0.1 * max_weight * torch.rand(input_layer_a.n, rtnn_layer_1.n)
 FF1a = Connection(source=input_layer_a, target=rtnn_layer_1,
-    w = w_rand_l1, timesteps = num_timesteps,
+	w = w_rand_l1, timesteps = num_timesteps,
     update_rule=TNN_STDP, **stdp_tnn_params)
 
 # Recurrent connections
 w_eye_rtnn = torch.diag(torch.ones(rtnn_layer_1.n))
 rTNN_to_buf1 = Connection(source=rtnn_layer_1, target=buffer_layer_1,
-    w = w_eye_rtnn, update_rule=None)
+	w = w_eye_rtnn, update_rule=None)
 
 # Force recurrent connectivity to be sparse, but strong.
 w_recur = max_weight * torch.rand(rtnn_layer_1.n, rtnn_layer_1.n)
 w_recur[torch.rand(rtnn_layer_1.n, rtnn_layer_1.n) < 0.90] = 0
 buf1_to_rTNN = Connection(
-    source=buffer_layer_1,
-    target=rtnn_layer_1,
-    w = w_recur,
+	source=buffer_layer_1,
+	target=rtnn_layer_1,
+	w = w_recur,
     timesteps = num_timesteps,
-    update_rule=TNN_STDP, **stdp_tnn_params)
+    update_rule=None )
 
 
 # Add all nodes to network:
@@ -142,25 +143,25 @@ network.add_connection(buf1_to_rTNN, source="BUF_1", target="rTNN_1")
 # Monitors:
 spikes = {}
 for l in network.layers:
-    spikes[l] = Monitor(network.layers[l], ["s"], time=num_timesteps)
-    network.add_monitor(spikes[l], name="%s_spikes" % l)
+	spikes[l] = Monitor(network.layers[l], ["s"], time=num_timesteps)
+	network.add_monitor(spikes[l], name="%s_spikes" % l)
 
 
 # Data and initial encoding:
 dataset = MNIST(
-    PoissonEncoder(time=num_timesteps, dt=1),
-    None,
-    root=os.path.join("..", "..", "data", "MNIST"),
-    download=True,
-    transform=transforms.Compose(
-        [transforms.ToTensor(), transforms.Lambda(lambda x: x * intensity)]
-    ),
+	RampNoLeakTNNEncoder(time=num_timesteps, dt=1),
+	None,
+	root=os.path.join("..", "..", "data", "MNIST"),
+	download=True,
+	transform=transforms.Compose(
+		[transforms.ToTensor(), transforms.Lambda(lambda x: x * intensity)]
+	),
 )
 
 
 # Create a dataloader to iterate and batch data
 dataloader = torch.utils.data.DataLoader(
-    dataset, batch_size=1, shuffle=True, num_workers=0, pin_memory=False
+	dataset, batch_size=1, shuffle=True, num_workers=0, pin_memory=False
 )
 
 
