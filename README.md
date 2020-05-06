@@ -3,7 +3,7 @@ This repository is an archive of work done in exploring recurrent temporal neura
 
 The top-level directories are:
 * SpykeTorch
-* bindsnet_reference - contains reservoir reference template from BindsNET
+* bindsnet_reference - contains slightly modified reservoir reference template from BindsNET
 * recurrent_only_scripts - contains variants of recurrent-only architecture
 * reference_files
 
