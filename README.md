@@ -2,7 +2,7 @@
 This repository is an archive of work done in exploring recurrent temporal neural networks (rTNNs) in 18847-Neuromorphic Computing Architecture.
 
 The top-level directories are:
-* SpykeTorch
+* SpykeTorch - scripts used for Lab1 in TNN column implementation
 * bindsnet_reference - contains slightly modified reservoir reference template from BindsNET
 * recurrent_only_scripts - contains variants of recurrent-only architecture
 
