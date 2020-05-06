@@ -21,6 +21,6 @@ Additional top level files are:
 * test_TNN_lr_readout.py
 * test_TNN_w_on_off.py
 * test_buffer_nodes.py
-* tnn_inhib_recur.py
+* tnn_inhibt_recur_TNN.py
 
 Running these codes requires an installation of BindsNET. More details on that can be found here: <https://github.com/BindsNET/bindsnet>.
